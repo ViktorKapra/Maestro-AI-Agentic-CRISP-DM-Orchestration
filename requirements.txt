@@ -1,0 +1,5 @@
+# Minimal CrewAI starter dependencies.
+# CrewAI brings its own LLM plumbing (built on LiteLLM), so this is all you need
+# for a first run. Pin a known-good range; bump deliberately later.
+crewai>=0.80,<1.0
+python-dotenv>=1.0
