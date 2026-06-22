@@ -3,14 +3,8 @@
 Subcommands:
     data download --case <name>         Download a bundled demonstration dataset.
     data download --competition <slug>  Download any Kaggle competition.
-    run --case <name>                   Placeholder; you wire your framework here.
-    run --config <path>                 Placeholder; you wire your framework here.
-
-The `run` subcommand currently loads the config and initialises a
-CrispDMState, then prints what the system would have done. It is a
-placeholder. Once you have chosen a multi-agent framework and wired up
-the five agents, replace the body of `cmd_run` below with a call into
-your framework's entry point.
+    run --case <name>                   Run the CrewAI-backed CRISP-DM pipeline.
+    run --config <path>                 Run from an explicit case config YAML.
 """
 from __future__ import annotations
 
@@ -22,7 +16,7 @@ from dotenv import load_dotenv
 
 from maads.config import load_case_config
 from maads.data_utils import download_case_data, download_kaggle_competition
-from maads.state import CrispDMState
+from maads.run import run
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -75,43 +69,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """Placeholder run command.
-
-    Replace this with a call into your multi-agent framework. The shape
-    is:
-        1. Load the config and initialise CrispDMState.
-        2. Hand the state (or a slice of it) to your framework's entry point.
-        3. After the framework returns, dump the final state for inspection.
-    """
-    if args.config:
-        config_path = args.config
-    else:
-        config_path = Path(args.config_dir) / f"{args.case}.yaml"
+    """Resolve the case config and delegate to ``maads.run.run``."""
+    config_path = args.config if args.config else Path(args.config_dir) / f"{args.case}.yaml"
 
     if not config_path.exists():
         print(f"ERROR: config not found: {config_path}", file=sys.stderr)
         return 1
 
     config = load_case_config(config_path)
-    state = CrispDMState.from_config(config)
-
-    artifact_dir = Path(args.artifact_dir) / config.case_id
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-
-    state.append_log(
-        agent="cli",
-        message="No framework wired up yet. This is the placeholder run.",
-        level="warn",
-    )
-    state.halted = True
-    state.halt_reason = "no framework wired up"
-
-    state_path = artifact_dir / "final_state.json"
-    state_path.write_text(state.model_dump_json(indent=2))
-    print(f"Final state written to {state_path}")
-    print("(Placeholder run — wire your multi-agent framework into "
-          "maads/__main__.py:cmd_run to make this do real work.)")
-    return 0
+    state = run(config=config, artifact_dir=Path(args.artifact_dir))
+    return 1 if state.halted else 0
 
 
 def cmd_data_download(args: argparse.Namespace) -> int:

@@ -30,22 +30,43 @@ MAX_INNER_LOOP_ITERATIONS = 3  # the 3 ↔ 4 loop specifically
 
 
 class Orchestrator:
-    def __init__(self, state: CrispDMState, artifact_dir: Path) -> None:
+    def __init__(
+        self,
+        state: CrispDMState,
+        artifact_dir: Path,
+        *,
+        inputs: dict[str, str] | None = None,
+    ) -> None:
         self.state = state
         self.artifact_dir = artifact_dir
-        self.pm = ProjectManagerAgent(artifact_dir=artifact_dir)
-        self.agents: dict[str, Agent] = {
-            "pm": self.pm,
-            "domain":         DomainExpertAgent(artifact_dir=artifact_dir),
-            "data_engineer":  DataEngineerAgent(artifact_dir=artifact_dir),
-            "data_scientist": DataScientistAgent(artifact_dir=artifact_dir),
-            "developer":      DeveloperAgent(artifact_dir=artifact_dir),
-        }
+        # Flat dict passed to each agent's CrewAI kickoff(inputs=...).
+        self.inputs = inputs or {}
+        self._pm: ProjectManagerAgent | None = None
+        self._agents: dict[str, Agent] | None = None
 
         # Bookkeeping for the hard caps.
         self._n_transitions = 0
         self._phase_visits: dict[int, int] = {}
         self._inner_loop_count = 0
+
+    @property
+    def pm(self) -> ProjectManagerAgent:
+        if self._pm is None:
+            self._pm = ProjectManagerAgent(artifact_dir=self.artifact_dir)
+        return self._pm
+
+    @property
+    def agents(self) -> dict[str, Agent]:
+        if self._agents is None:
+            artifact_dir = self.artifact_dir
+            self._agents = {
+                "pm": self.pm,
+                "domain": DomainExpertAgent(artifact_dir=artifact_dir),
+                "data_engineer": DataEngineerAgent(artifact_dir=artifact_dir),
+                "data_scientist": DataScientistAgent(artifact_dir=artifact_dir),
+                "developer": DeveloperAgent(artifact_dir=artifact_dir),
+            }
+        return self._agents
 
     def run(self) -> CrispDMState:
         """Walk the state machine until phase 6 completes or a cap is hit.

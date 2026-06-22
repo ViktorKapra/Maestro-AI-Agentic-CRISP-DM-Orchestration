@@ -1,0 +1,45 @@
+# House Prices — Advanced Regression Techniques
+case_id: house_prices
+kaggle_competition: house-prices-advanced-regression-techniques
+problem_statement: |
+  Predict the final sale price of residential homes in Ames, Iowa, based on
+  79 explanatory variables describing nearly every aspect of the property.
+
+problem_type: regression
+target_column: SalePrice
+id_column: Id
+evaluation_metric: rmse_log   # Kaggle uses RMSE on log(SalePrice)
+
+data:
+  train_csv: data/house_prices/train.csv
+  test_csv: data/house_prices/test.csv
+  sample_submission_csv: data/house_prices/sample_submission.csv
+
+feature_hints:
+  # House Prices has many ordinals encoded as strings ("Ex", "Gd", "TA", "Fa", "Po")
+  ordinal_string_encoded:
+    - ExterQual
+    - ExterCond
+    - BsmtQual
+    - BsmtCond
+    - HeatingQC
+    - KitchenQual
+    - FireplaceQu
+    - GarageQual
+    - GarageCond
+    - PoolQC
+  # In this dataset, "NA" often means "absence of feature" (no basement),
+  # not "missing value". The Domain Expert should flag this.
+  na_means_absent:
+    - Alley
+    - BsmtQual
+    - BsmtCond
+    - FireplaceQu
+    - GarageType
+    - PoolQC
+    - Fence
+    - MiscFeature
+
+success_criterion:
+  metric: rmse_log
+  threshold: 0.15   # above this, the 5 -> 1 loop should fire
