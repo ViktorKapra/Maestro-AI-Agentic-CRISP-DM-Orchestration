@@ -8,3 +8,9 @@ PyYAML>=6.0
 # CrewAI starter (optional multi-agent framework demo)
 # CrewAI brings its own LLM plumbing (built on LiteLLM); pin deliberately.
 crewai>=0.80,<1.0
+crewai-tools>=0.12
+
+# ML stack — Phase 1 fixed-baseline modeling (canonical list lives in pyproject.toml)
+pandas>=2.1
+scikit-learn>=1.4
+pyarrow>=15.0

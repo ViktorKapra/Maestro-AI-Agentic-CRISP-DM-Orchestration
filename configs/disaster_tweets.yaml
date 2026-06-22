@@ -1,0 +1,31 @@
+# Natural Language Processing with Disaster Tweets
+case_id: disaster_tweets
+kaggle_competition: nlp-getting-started
+problem_statement: |
+  Classify whether a tweet is about a real disaster (1) or not (0).
+  The primary feature is the free-text content of the tweet; two weak
+  auxiliary signals (keyword, location) are also provided.
+
+problem_type: binary_classification
+target_column: target
+id_column: id
+evaluation_metric: f1
+
+data:
+  train_csv: data/disaster_tweets/train.csv
+  test_csv: data/disaster_tweets/test.csv
+  sample_submission_csv: data/disaster_tweets/sample_submission.csv
+
+feature_hints:
+  text_free: [text]
+  categorical_weak: [keyword, location]
+  # Strong hint for the Data Engineer: the main feature is text. A working
+  # representation is TF-IDF + classical ML, OR sentence embeddings via the
+  # OpenAI embeddings endpoint + classical ML. Do NOT fine-tune a transformer.
+  representation_options:
+    - tfidf_logreg
+    - openai_embeddings_logreg
+
+success_criterion:
+  metric: f1
+  threshold: 0.78
