@@ -1,0 +1,110 @@
+<svg width="100%" viewBox="0 0 680 686" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Нова архитектура: CrewAI агенти върху запазения maads scaffold</title>
+<desc>CLI извиква попълнения Orchestrator (запазен скелет от scaffold: caps и loop контрол). Той пита Project Manager за Plan решение и диспечира към 5 агента през запазения seam plan(state)/act(state); телата вече се изпълняват от CrewAI (crew.py/prompts.py). Агентите ползват инструменти (PythonExec като CrewAI BaseTool, RAGRetriever за имплементация, FileIO) и пишат именувани изходи в запазения CrispDMState. Отдолу е запазената инфраструктура config.py, llm.py (token caps), data_utils.py. Цвят: зелено = запазваш scaffold-а както е; синьо = твоя работа.</desc>
+<defs>
+<style>
+  text { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .t  { font-size: 14px; fill: #1a1a1a; }
+  .ts { font-size: 12px; fill: #5f6368; }
+  .th { font-size: 14px; font-weight: 500; fill: #1a1a1a; }
+  rect.c-green { fill: #e6f4ea; stroke: #34a853; stroke-width: 1.5; }
+  rect.c-blue  { fill: #e8f0fe; stroke: #4285f4; stroke-width: 1.5; }
+  .arr    { stroke: #80868b; stroke-width: 1.5; fill: none; }
+  .leader { stroke: #b0b3b8; stroke-width: 0.75; stroke-dasharray: 3 3; fill: none; }
+</style>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+
+<!-- legend -->
+<rect x="40" y="40" width="12" height="12" rx="3" class="c-green"/>
+<text x="58" y="50" class="ts">Keep scaffold as-is</text>
+<rect x="230" y="40" width="12" height="12" rx="3" class="c-blue"/>
+<text x="248" y="50" class="ts">Your work: replace ABC / fill stubs</text>
+
+<!-- CLI -->
+<rect x="250" y="62" width="180" height="44" rx="8" class="c-blue"/>
+<text x="340" y="83" class="th" text-anchor="middle">__main__.py</text>
+<text x="340" y="98" class="ts" text-anchor="middle">cmd_run: fill placeholder</text>
+<line x1="340" y1="106" x2="340" y2="134" class="arr" marker-end="url(#arrow)"/>
+
+<!-- Orchestrator -->
+<rect x="120" y="136" width="440" height="58" rx="8" class="c-blue"/>
+<text x="340" y="160" class="th" text-anchor="middle">orchestrator.py — fill run() + helpers</text>
+<text x="340" y="178" class="ts" text-anchor="middle">caps 12 · 3 · 3 · prereq gating · _dispatch · _fire_loop</text>
+
+<!-- loop back edge -->
+<path d="M120 220 C 64 220, 64 166, 120 166" fill="none" class="arr" marker-end="url(#arrow)"/>
+<line x1="340" y1="194" x2="340" y2="204" class="arr" marker-end="url(#arrow)"/>
+
+<!-- loops bar -->
+<rect x="120" y="206" width="440" height="30" rx="6" class="c-blue"/>
+<text x="340" y="225" class="ts" text-anchor="middle">Feedback loops:  A 2→1 · B 4→3 (≤3) · C 5→1 · D 6→1</text>
+<line x1="340" y1="236" x2="340" y2="264" class="arr" marker-end="url(#arrow)"/>
+
+<!-- PM hub -->
+<rect x="245" y="266" width="190" height="48" rx="8" class="c-blue"/>
+<text x="340" y="287" class="th" text-anchor="middle">Project Manager</text>
+<text x="340" y="303" class="ts" text-anchor="middle">returns Plan{action…}</text>
+
+<!-- PM -> agents -->
+<line x1="340" y1="314" x2="108" y2="328" class="arr" marker-end="url(#arrow)"/>
+<line x1="340" y1="314" x2="263" y2="328" class="arr" marker-end="url(#arrow)"/>
+<line x1="340" y1="314" x2="418" y2="328" class="arr" marker-end="url(#arrow)"/>
+<line x1="340" y1="314" x2="573" y2="328" class="arr" marker-end="url(#arrow)"/>
+
+<!-- agents row -->
+<rect x="40" y="328" width="135" height="52" rx="8" class="c-blue"/>
+<text x="107" y="349" class="th" text-anchor="middle">Domain Expert</text>
+<text x="107" y="365" class="ts" text-anchor="middle">plan/act seam</text>
+<rect x="195" y="328" width="135" height="52" rx="8" class="c-blue"/>
+<text x="262" y="349" class="th" text-anchor="middle">Data Engineer</text>
+<text x="262" y="365" class="ts" text-anchor="middle">plan/act seam</text>
+<rect x="350" y="328" width="135" height="52" rx="8" class="c-blue"/>
+<text x="417" y="349" class="th" text-anchor="middle">Data Scientist</text>
+<text x="417" y="365" class="ts" text-anchor="middle">plan/act seam</text>
+<rect x="505" y="328" width="135" height="52" rx="8" class="c-blue"/>
+<text x="572" y="349" class="th" text-anchor="middle">Developer</text>
+<text x="572" y="365" class="ts" text-anchor="middle">+ debug toolkit</text>
+
+<text x="340" y="394" class="ts" text-anchor="middle">ABC replaced — bodies run on CrewAI</text>
+<line x1="340" y1="398" x2="340" y2="416" class="arr" marker-end="url(#arrow)"/>
+
+<!-- crew construction -->
+<rect x="120" y="418" width="440" height="54" rx="8" class="c-blue"/>
+<text x="340" y="440" class="th" text-anchor="middle">crew.py  +  prompts.py   (new)</text>
+<text x="340" y="457" class="ts" text-anchor="middle">CrewAI Agent · Task · kickoff · per-agent llm=</text>
+<line x1="340" y1="472" x2="340" y2="490" class="arr" marker-end="url(#arrow)"/>
+
+<!-- tools row -->
+<rect x="40" y="492" width="185" height="52" rx="8" class="c-green"/>
+<text x="132" y="513" class="th" text-anchor="middle">PythonExec</text>
+<text x="132" y="529" class="ts" text-anchor="middle">keep + BaseTool wrap</text>
+<rect x="247" y="492" width="186" height="52" rx="8" class="c-blue"/>
+<text x="340" y="513" class="th" text-anchor="middle">RAGRetriever</text>
+<text x="340" y="529" class="ts" text-anchor="middle">stub → implement</text>
+<rect x="454" y="492" width="186" height="52" rx="8" class="c-green"/>
+<text x="547" y="513" class="th" text-anchor="middle">FileIO</text>
+<text x="547" y="529" class="ts" text-anchor="middle">keep</text>
+
+<line x1="340" y1="544" x2="340" y2="562" class="arr" marker-end="url(#arrow)"/>
+<text x="350" y="557" class="ts" text-anchor="start">named outputs</text>
+
+<!-- state spine -->
+<rect x="40" y="564" width="600" height="54" rx="8" class="c-green"/>
+<text x="340" y="586" class="th" text-anchor="middle">CrispDMState   (state.py — the spine, keep)</text>
+<text x="340" y="603" class="ts" text-anchor="middle">view_for · substep_prereqs_satisfied · token_spend · append-only log</text>
+
+<!-- support underpin -->
+<line x1="340" y1="632" x2="340" y2="620" class="leader" marker-end="url(#arrow)"/>
+
+<!-- support row -->
+<rect x="40" y="632" width="185" height="46" rx="8" class="c-green"/>
+<text x="132" y="652" class="th" text-anchor="middle">config.py</text>
+<text x="132" y="668" class="ts" text-anchor="middle">CaseConfig · configs/*.yaml</text>
+<rect x="247" y="632" width="186" height="46" rx="8" class="c-green"/>
+<text x="340" y="652" class="th" text-anchor="middle">llm.py</text>
+<text x="340" y="668" class="ts" text-anchor="middle">token caps · tiering (keep)</text>
+<rect x="454" y="632" width="186" height="46" rx="8" class="c-green"/>
+<text x="547" y="652" class="th" text-anchor="middle">data_utils.py</text>
+<text x="547" y="668" class="ts" text-anchor="middle">Kaggle download</text>
+</svg>
