@@ -14,16 +14,18 @@ Phase 1 split:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from maads.codegen import run_authored_code
 from maads.crew import CrewKickoffError, run_json_task
 from maads.prompts import PM_DECISION_INSTRUCTION
 from maads.prompts.identities.data_engineer import format_data_engineer_task
 from maads.prompts.identities.data_scientist import format_data_scientist_task
 from maads.prompts.identities.domain import format_domain_understanding_task
-from maads.state import CrispDMState, ModelRun, next_substep
+from maads.state import CrispDMState, ModelRun
 from maads.tools import FileIO, PythonExec
 
 
@@ -44,6 +46,21 @@ class StateDelta:
     """What an agent changed, for logging."""
     fields_written: list[str] = field(default_factory=list)
     notes: str = ""
+
+
+def _coerce_phase(value: Any) -> int | None:
+    """Coerce an LLM-supplied loop target to an int phase (1-6), or None.
+
+    Models routinely return the phase as a string ("1") or a label
+    ("Phase 1"); `Phase` is an IntEnum, so `Phase("1")` would raise. Normalise
+    here so the orchestrator can build `Phase(int)` safely.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 1 <= value <= 6 else None
+    m = re.search(r"[1-6]", str(value))
+    return int(m.group()) if m else None
 
 
 # ── Shared helpers (composition, not inheritance) ───────────────────────────
@@ -122,6 +139,26 @@ if target in df.columns:
 print(json.dumps(out))
 '''
 
+_QUALITY_SRC = '''
+import pandas as pd, json
+df = pd.read_csv(r"__TRAIN__")
+target = "__TARGET__"
+blockers = []; tolerable = []
+for c in df.columns:
+    miss = float(df[c].isna().mean())
+    if miss > 0.4:
+        blockers.append(c + ": %.0f%% missing" % (miss * 100))
+    elif miss > 0:
+        tolerable.append(c + ": %.0f%% missing (imputable)" % (miss * 100))
+    if int(df[c].nunique(dropna=True)) <= 1:
+        blockers.append(c + ": constant column")
+if bool(df.duplicated().any()):
+    tolerable.append(str(int(df.duplicated().sum())) + " duplicate rows")
+if target in df.columns and bool(df[target].isna().any()):
+    blockers.append(target + ": target has missing values")
+print(json.dumps({"blockers": blockers, "tolerable": tolerable}))
+'''
+
 _PREP_SRC = '''
 import pandas as pd, json, os
 train = pd.read_csv(r"__TRAIN__"); test = pd.read_csv(r"__TEST__")
@@ -129,7 +166,8 @@ os.makedirs(r"__OUTDIR__", exist_ok=True)
 tp = os.path.join(r"__OUTDIR__", "train.parquet")
 sp = os.path.join(r"__OUTDIR__", "test.parquet")
 train.to_parquet(tp); test.to_parquet(sp)
-print(json.dumps({"train": tp, "test": sp, "n_train": int(len(train)), "n_test": int(len(test))}))
+print(json.dumps({"train": tp, "test": sp, "n_train": int(len(train)), "n_test": int(len(test)),
+                  "derived": [], "dropped": []}))
 '''
 
 _TRAIN_SRC = _PIPE_HELPER + '''
@@ -190,7 +228,7 @@ class ProjectManagerAgent:
                     action=action,
                     target_substep=data.get("target_substep") or None,
                     loop_label=loop_label,
-                    loop_to_phase=data.get("loop_to_phase"),
+                    loop_to_phase=_coerce_phase(data.get("loop_to_phase")),
                     reason=str(data.get("reason", "")),
                 )
         return Plan(
@@ -322,37 +360,104 @@ class DomainExpertAgent:
 _DE_OWNED_SUBSTEPS = {"2.1", "2.2", "2.4", "3.1", "3.2", "3.3", "3.4", "3.5"}
 
 
+def _has_keys(payload: dict, *keys: str) -> list[str]:
+    """Contract helper: report any missing keys."""
+    return [f"missing key '{k}'" for k in keys if k not in payload]
+
+
 def _de_execution_evidence(
     pyexec: PythonExec,
     state: CrispDMState,
     substep: str,
     artifact_dir: Path,
 ) -> dict[str, Any]:
-    """Run baseline snippets and return evidence for the LLM contract."""
+    """Have the Data Engineer author and run the code for its owned substep.
+
+    Returns measured evidence in the shape `_apply_data_engineer_response`
+    expects. Each authored attempt self-debugs (codegen.run_authored_code) and
+    falls back to the fixed baseline snippet only when all attempts fail.
+    """
     train = _abspath(state.config.data.train_csv)
     test = _abspath(state.config.data.test_csv)
+    target = state.config.target_column
+    idc = state.config.id_column
+
     if substep == "2.1":
-        return {
-            "initial_data_collection_report": _run_snippet(
-                pyexec, _COLLECT_SRC, __TRAIN__=train, __TEST__=test,
-            ),
-        }
-    if substep == "2.2":
-        return {
-            "data_description_report": _run_snippet(
-                pyexec, _DESCRIBE_SRC, __TRAIN__=train,
-            ),
-        }
-    if substep == "3.5":
-        info = _run_snippet(
-            pyexec, _PREP_SRC,
-            __TRAIN__=train, __TEST__=test, __OUTDIR__=str(artifact_dir.resolve()),
+        res = run_authored_code(
+            pyexec=pyexec, agent_name="data_engineer", state=state,
+            instruction="CRISP-DM 2.1 Collect Initial Data: load the train and test "
+                        "CSVs and report a brief collection summary.",
+            header_vars={"TRAIN_CSV": train, "TEST_CSV": test},
+            contract=lambda p: _has_keys(p, "train_rows", "test_rows", "columns"),
+            contract_hint="Required keys: train_rows (int), test_rows (int), columns (list).",
+            fallback=lambda: _run_snippet(pyexec, _COLLECT_SRC, __TRAIN__=train, __TEST__=test),
+            fallback_code=_COLLECT_SRC,
         )
+        return {"initial_data_collection_report": res.payload}
+
+    if substep == "2.2":
+        res = run_authored_code(
+            pyexec=pyexec, agent_name="data_engineer", state=state,
+            instruction="CRISP-DM 2.2 Describe Data: profile the training data — "
+                        "row/column counts, dtypes, missing counts, cardinality.",
+            header_vars={"TRAIN_CSV": train},
+            contract=lambda p: _has_keys(p, "n_rows", "n_cols", "columns", "dtypes", "missing"),
+            contract_hint="Required keys: n_rows, n_cols, columns, dtypes, missing (per-column).",
+            fallback=lambda: _run_snippet(pyexec, _DESCRIBE_SRC, __TRAIN__=train),
+            fallback_code=_DESCRIBE_SRC,
+        )
+        return {"data_description_report": res.payload}
+
+    if substep == "2.4":
+        res = run_authored_code(
+            pyexec=pyexec, agent_name="data_engineer", state=state,
+            instruction="CRISP-DM 2.4 Verify Data Quality: inspect the training data "
+                        "and list genuine quality BLOCKERS (e.g. >40% missing, constant "
+                        "columns, missing target) vs tolerable issues. Compute from the data.",
+            header_vars={"TRAIN_CSV": train, "TARGET": target},
+            contract=lambda p: _has_keys(p, "blockers", "tolerable"),
+            contract_hint="Required keys: blockers (list of strings), tolerable (list of strings).",
+            fallback=lambda: _run_snippet(pyexec, _QUALITY_SRC, __TRAIN__=train, __TARGET__=target),
+            fallback_code=_QUALITY_SRC,
+        )
+        return {"data_quality_report": res.payload}
+
+    if substep == "3.5":
+        outdir = str(artifact_dir.resolve())
+        res = run_authored_code(
+            pyexec=pyexec, agent_name="data_engineer", state=state,
+            instruction="CRISP-DM Data Preparation (3.1-3.5): produce a model-ready "
+                        "dataset. Clean (impute missing), construct useful derived "
+                        "features, drop leakage/identifier columns, and write "
+                        "train.parquet and test.parquet into OUTDIR. Keep TARGET in train "
+                        "and ID_COL in test. Apply identical transforms to train and test.",
+            header_vars={
+                "TRAIN_CSV": train, "TEST_CSV": test, "OUTDIR": outdir,
+                "TARGET": target, "ID_COL": idc,
+            },
+            contract=lambda p: (
+                _has_keys(p, "train", "test", "n_train", "n_test")
+                or ([] if int(p.get("n_train", 0)) > 0 else ["n_train must be > 0"])
+            ),
+            contract_hint="Required keys: train (parquet path), test (parquet path), "
+                          "n_train (int>0), n_test (int), derived (list), dropped (list).",
+            fallback=lambda: _run_snippet(
+                pyexec, _PREP_SRC, __TRAIN__=train, __TEST__=test, __OUTDIR__=outdir,
+            ),
+            fallback_code=_PREP_SRC,
+        )
+        info = res.payload
+        n_derived = len(info.get("derived") or [])
         return {
             "dataset": {"train": info["train"], "test": info["test"]},
             "dataset_description": (
-                f"{info['n_train']} train / {info['n_test']} test rows (parquet)."
+                f"{info.get('n_train')} train / {info.get('n_test')} test rows (parquet); "
+                f"{n_derived} derived feature(s)"
+                + (" [degraded: baseline fallback]" if res.degraded else "")
             ),
+            "derived": info.get("derived") or [],
+            "dropped": info.get("dropped") or [],
+            "degraded": res.degraded,
         }
     return {}
 
@@ -382,12 +487,11 @@ def _apply_data_engineer_response(
             state.du.data_description_report = report
             fields.append("du.data_description_report")
     elif substep == "2.4":
-        report = du.get("data_quality_report") or execution.get("data_quality_report")
-        state.du.data_quality_report = report or {
-            "blockers": [],
-            "tolerable": ["missing values imputed in prep"],
-        }
-        fields.append("du.data_quality_report")
+        # Measured execution wins: real blockers must not be masked by an empty fallback.
+        report = execution.get("data_quality_report") or du.get("data_quality_report")
+        if report:
+            state.du.data_quality_report = report
+            fields.append("du.data_quality_report")
     elif substep == "3.1":
         rationale = dp.get("rationale_for_inclusion_exclusion") or execution.get(
             "rationale_for_inclusion_exclusion",
@@ -396,11 +500,12 @@ def _apply_data_engineer_response(
             state.dp.rationale_for_inclusion_exclusion = rationale
             fields.append("dp.rationale_for_inclusion_exclusion")
     elif substep == "3.2":
+        # The actual cleaning runs in the authored prep code at 3.5; here record the
+        # DE's described strategy without fabricating a specific one if absent.
         report = dp.get("data_cleaning_report") or execution.get("data_cleaning_report")
-        state.dp.data_cleaning_report = report or {
-            "strategy": "median/most-frequent impute, one-hot encode (in pipeline)",
-        }
-        fields.append("dp.data_cleaning_report")
+        if report:
+            state.dp.data_cleaning_report = report
+            fields.append("dp.data_cleaning_report")
     elif substep == "3.3":
         derived = dp.get("derived_attributes") or execution.get("derived_attributes")
         if derived is not None:
@@ -418,14 +523,23 @@ def _apply_data_engineer_response(
             state.dp.merged_data = merged
             fields.append("dp.merged_data")
     elif substep == "3.5":
-        dataset = dp.get("dataset") or execution.get("dataset")
-        description = dp.get("dataset_description") or execution.get("dataset_description")
+        # Measured execution wins: dataset paths and derived features come from the
+        # code that actually ran, not from LLM prose.
+        dataset = execution.get("dataset") or dp.get("dataset")
+        description = execution.get("dataset_description") or dp.get("dataset_description")
         if dataset:
             state.dp.dataset = dataset
             fields.append("dp.dataset")
         if description:
             state.dp.dataset_description = description
             fields.append("dp.dataset_description")
+        derived = execution.get("derived")
+        if derived:
+            state.dp.derived_attributes = {"items": derived}
+            fields.append("dp.derived_attributes")
+        if execution.get("degraded"):
+            state.dp.reformatted_data = {"degraded": True, "reason": "DE prep fell back to baseline"}
+            fields.append("dp.reformatted_data")
 
     summary = (data or {}).get("summary", "")
     return StateDelta(fields, notes=summary or f"DE completed {substep}")
@@ -471,33 +585,59 @@ def _ds_execution_evidence(
     state: CrispDMState,
     substep: str,
 ) -> dict[str, Any]:
-    """Run baseline snippets and return evidence for the LLM contract."""
+    """Have the Data Scientist author and run the code for its owned substep."""
     train = _abspath(state.config.data.train_csv)
     target = state.config.target_column
+
     if substep == "2.3":
-        return {
-            "data_exploration_report": _run_snippet(
-                pyexec, _EXPLORE_SRC, __TRAIN__=train, __TARGET__=target,
-            ),
-        }
+        res = run_authored_code(
+            pyexec=pyexec, agent_name="data_scientist", state=state,
+            instruction="CRISP-DM 2.3 Explore Data: probe the training data to inform "
+                        "modeling — target balance, feature/target relationships, "
+                        "notable distributions. Compute from the data, do not guess.",
+            header_vars={"TRAIN_CSV": train, "TARGET": target},
+            contract=lambda p: _has_keys(p, "n_rows", "target"),
+            contract_hint="Required keys: n_rows (int), target (str); add any findings "
+                          "(e.g. target_distribution, correlations).",
+            fallback=lambda: _run_snippet(pyexec, _EXPLORE_SRC, __TRAIN__=train, __TARGET__=target),
+            fallback_code=_EXPLORE_SRC,
+        )
+        return {"data_exploration_report": res.payload}
+
     if substep == "4.3":
         dataset_train = state.dp.dataset.get("train")
         if not dataset_train:
             return {}
-        res = _run_snippet(
-            pyexec, _TRAIN_SRC,
-            __TRAIN__=dataset_train,
-            __TARGET__=target,
-            __ID__=state.config.id_column,
+        idc = state.config.id_column
+        res = run_authored_code(
+            pyexec=pyexec, agent_name="data_scientist", state=state,
+            instruction="CRISP-DM 4.3 Build Model: read the prepared parquet at "
+                        "TRAIN_PARQUET, choose a suitable scikit-learn classifier and "
+                        "feature set yourself, and evaluate it with stratified k-fold "
+                        "cross-validation on the configured metric. Drop TARGET and "
+                        "ID_COL from the features.",
+            header_vars={"TRAIN_PARQUET": dataset_train, "TARGET": target, "ID_COL": idc},
+            contract=lambda p: (
+                _has_keys(p, "technique", "cv_score")
+                or ([] if isinstance(p.get("cv_score"), (int, float)) else ["cv_score must be numeric"])
+            ),
+            contract_hint="Required keys: technique (str), cv_score (float), n_features (int).",
+            fallback=lambda: _run_snippet(
+                pyexec, _TRAIN_SRC, __TRAIN__=dataset_train, __TARGET__=target, __ID__=idc,
+            ),
+            fallback_code=_TRAIN_SRC,
         )
+        p = res.payload
         return {
             "model_run": {
-                "technique": res["technique"],
-                "cv_score": res["cv_score"],
-                "cv_std": res.get("cv_std"),
-                "description": f"{res['n_features']} features, 5-fold CV",
-                "parameter_settings": {},
+                "technique": p.get("technique") or "unspecified",
+                "cv_score": p.get("cv_score"),
+                "cv_std": p.get("cv_std"),
+                "description": f"{p.get('n_features', '?')} features, CV"
+                               + (" [degraded: baseline fallback]" if res.degraded else ""),
+                "parameter_settings": p.get("parameter_settings") or {},
             },
+            "degraded": res.degraded,
         }
     return {}
 
@@ -526,9 +666,9 @@ def _apply_data_scientist_response(
         state.du.data_exploration_report = report
         fields.append("du.data_exploration_report")
     elif substep == "4.1":
-        state.md.modeling_technique = (
-            md.get("modeling_technique") or "gradient_boosting"
-        )
+        # The DS's stated intent; the authoritative technique is whatever its 4.3
+        # code actually trains (recorded on the ModelRun below).
+        state.md.modeling_technique = md.get("modeling_technique") or "to be chosen at 4.3"
         state.md.modeling_assumptions = md.get("modeling_assumptions") or [
             "tabular features", "no leakage (pipeline fit on train only)",
         ]
@@ -540,19 +680,24 @@ def _apply_data_scientist_response(
         }
         fields.append("md.test_design")
     elif substep == "4.3":
+        # Measured execution wins: technique and cv_score come from the code the DS
+        # actually ran, not from LLM prose (which may only enrich the description).
         run = dict(execution.get("model_run") or {})
         llm_run = md.get("model_run") or {}
         if llm_run.get("description"):
             run["description"] = llm_run["description"]
         if not run:
             run = llm_run
+        technique = run.get("technique") or "unspecified"
         state.md.models.append(ModelRun(
-            technique=run.get("technique") or "gradient_boosting",
+            technique=technique,
             cv_score=run.get("cv_score"),
-            description=run.get("description") or "baseline model run",
+            description=run.get("description") or "model run",
             parameter_settings=run.get("parameter_settings") or {},
         ))
-        fields.append("md.models")
+        # Reflect the actually-trained technique back onto the phase-level field.
+        state.md.modeling_technique = technique
+        fields.extend(["md.models", "md.modeling_technique"])
     elif substep == "4.4":
         if state.md.models:
             best = max(state.md.models, key=lambda m: m.cv_score or 0.0)

@@ -28,6 +28,10 @@ def fast_run(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MAADS_PROGRESS", "0")
     monkeypatch.setenv("CREWAI_DISABLE_TELEMETRY", "true")
     monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    # DE/DS author code via run_text_task; without a live LLM, return no code so
+    # run_authored_code deterministically falls back to the fixed sklearn snippets
+    # (the "real snippets" these path-coverage tests already rely on).
+    monkeypatch.setattr("maads.codegen.run_text_task", lambda *a, **k: "")
 
 
 def _artifact_dir(tmp_path: Path) -> Path:

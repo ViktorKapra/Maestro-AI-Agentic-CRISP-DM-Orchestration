@@ -209,6 +209,9 @@ class CrispDMState(BaseModel):
     phase: Phase = Phase.BUSINESS_UNDERSTANDING
     substep: str = "1.1"
     loop_history: list[LoopEvent] = Field(default_factory=list)
+    # Deficits found by a state-artifact validator at the last phase transition;
+    # a non-empty list is a Loop B signal the PM reads via view_for("pm").
+    validator_findings: list[str] = Field(default_factory=list)
     halted: bool = False
     halt_reason: str | None = None
 
@@ -296,6 +299,7 @@ class CrispDMState(BaseModel):
             base["latest_quality_blockers"] = _quality_blockers(self.du.data_quality_report)
             base["latest_model_assessment"] = _latest_model_assessment(self.md)
             base["outputs_status"] = _pm_outputs_status(self)
+            base["validator_findings"] = list(self.validator_findings)
             assessment = self.ev.assessment_of_dm_results or {}
             base["business_goal_met"] = bool(assessment.get("meets"))
         elif agent_name == "domain":

@@ -23,6 +23,7 @@ from maads.agents import (
 )
 from maads.shutdown import INTERRUPT_HALT_REASON, shutdown_requested
 from maads.state import SUBSTEPS, SUBSTEP_OWNER, CrispDMState, Phase
+from maads.validators import validate_phase_3_artifacts, validate_phase_4_models
 
 
 # Hard caps. Tighten before the demo; loosen during development.
@@ -146,13 +147,37 @@ class Orchestrator:
         self.state.append_log(owner, f"ran {substep} -> {detail}")
 
     def _fire_loop(self, target_phase: int, reason: str, label: str = "?") -> None:
+        target_phase = int(target_phase)  # defend against a stringy LLM value
         self.state.record_loop(label, int(self.state.phase), target_phase, reason)
         if label == "B":
             self._inner_loop_count += 1
         self.state.phase = Phase(target_phase)
         self.state.substep = SUBSTEPS[Phase(target_phase)][0]
         self._phase_visits[target_phase] = self._phase_visits.get(target_phase, 0) + 1
+        # The loop addresses the findings; clear them so they don't re-fire next turn.
+        self.state.validator_findings = []
         self.state.append_log("orchestrator", f"loop {label} -> phase {target_phase}: {reason}", level="warn")
+
+    def _validate_on_transition(self, leaving_phase: Phase) -> None:
+        """Run the state-artifact validator when leaving a phase that produces them.
+
+        Findings land in `state.validator_findings`; the PM reads them on the next
+        turn and may fire a Loop B instead of advancing on a lie.
+        """
+        if leaving_phase == Phase.DATA_PREPARATION:
+            findings = validate_phase_3_artifacts(self.state)
+        elif leaving_phase == Phase.MODELING:
+            findings = validate_phase_4_models(self.state)
+        else:
+            return
+        self.state.validator_findings = findings
+        if findings:
+            self.state.append_log(
+                "orchestrator",
+                f"validator found {len(findings)} deficit(s) leaving phase "
+                f"{int(leaving_phase)}: {'; '.join(findings)}",
+                level="warn",
+            )
 
     def _advance_substep(self) -> bool:
         """Advance to the next substep / phase. Return True when the run is done."""
@@ -163,7 +188,8 @@ class Orchestrator:
         if i + 1 < len(subs):
             self.state.substep = subs[i + 1]
             return False
-        # end of this phase -> next phase
+        # end of this phase -> validate artifacts, then advance to next phase
+        self._validate_on_transition(phase)
         self._n_transitions += 1
         next_phase = int(phase) + 1
         if next_phase > int(Phase.DEPLOYMENT):

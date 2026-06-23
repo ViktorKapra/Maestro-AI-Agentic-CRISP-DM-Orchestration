@@ -141,16 +141,17 @@ def build_task_description(
     return description, state_view, agent
 
 
-def run_json_task(
+def _kickoff(
     agent_name: str,
     instruction: str,
     state: CrispDMState,
-    schema_hint: str = "",
-) -> dict | None:
-    """Run one CrewAI task for `agent_name` and return parsed JSON (or None).
+    schema_hint: str,
+    expected_output: str,
+) -> str:
+    """Run one CrewAI task and return its raw string output.
 
-    Sends only `state.view_for(agent_name)` as context (token discipline), and
-    folds the reported token usage into `state.token_spend``.
+    Sends only `state.view_for(agent_name)` as context (token discipline) and
+    folds the reported token usage into `state.token_spend`.
 
     Raises:
         CrewKickoffError: when CrewAI kickoff fails.
@@ -159,11 +160,7 @@ def run_json_task(
     description, _state_view, agent = build_task_description(
         agent_name, instruction, state, schema_hint
     )
-    task = Task(
-        description=description,
-        expected_output="A single JSON object, no prose, no Markdown fences.",
-        agent=agent,
-    )
+    task = Task(description=description, expected_output=expected_output, agent=agent)
     crew = Crew(agents=[agent], tasks=[task], verbose=False)
     try:
         output = crew.kickoff()
@@ -186,10 +183,47 @@ def run_json_task(
     except (AttributeError, TypeError, ValueError):
         pass
     _check_token_budget(state)
+    return raw_output
 
+
+def run_json_task(
+    agent_name: str,
+    instruction: str,
+    state: CrispDMState,
+    schema_hint: str = "",
+) -> dict | None:
+    """Run one CrewAI task for `agent_name` and return parsed JSON (or None).
+
+    Raises:
+        CrewKickoffError: when kickoff fails or the output is not JSON.
+        RuntimeError: when MAX_TOKENS_PER_RUN is exceeded after the call.
+    """
+    raw_output = _kickoff(
+        agent_name, instruction, state, schema_hint,
+        expected_output="A single JSON object, no prose, no Markdown fences.",
+    )
     parsed = _extract_json(raw_output)
     if parsed is None and raw_output.strip():
         raise CrewKickoffError(
             f"CrewAI returned non-JSON output for {agent_name} at substep {state.substep}"
         )
     return parsed
+
+
+def run_text_task(
+    agent_name: str,
+    instruction: str,
+    state: CrispDMState,
+    expected_output: str = "The requested output.",
+) -> str:
+    """Run one CrewAI task and return the raw text output (no JSON parsing).
+
+    Used for code authoring, where demanding JSON-wrapped code would force the
+    model to escape quotes/newlines inside a string — exactly what small models
+    get wrong. Instead the agent returns a fenced code block we extract verbatim.
+
+    Raises:
+        CrewKickoffError: when CrewAI kickoff fails.
+        RuntimeError: when MAX_TOKENS_PER_RUN is exceeded after the call.
+    """
+    return _kickoff(agent_name, instruction, state, "", expected_output)

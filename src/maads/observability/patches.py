@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import os
 import time
 from typing import Any
 
@@ -10,6 +11,21 @@ from maads.observability import context as ctx
 from maads.observability.collector import get_collector
 from maads.observability.python_tracer import PythonTracer
 from maads.state import SUBSTEP_NAMES, SUBSTEP_OWNER
+
+# Caps for code/stdout/stderr captured into the trace (override via env).
+_CODE_TRACE_LIMIT = int(os.getenv("MAADS_TRACE_CODE_LIMIT", "20000"))
+_IO_TRACE_LIMIT = int(os.getenv("MAADS_TRACE_IO_LIMIT", "4000"))
+
+
+def _clip(text: str | None, limit: int) -> str:
+    """Keep traces bounded: return text, or a head+tail slice with an elision marker."""
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    head = text[: limit - 200]
+    tail = text[-200:]
+    return f"{head}\n... [clipped {len(text) - limit} chars] ...\n{tail}"
 
 
 def _subprocess_key(code: str) -> str:
@@ -386,6 +402,9 @@ def _patch_tools() -> None:
                 name="PythonExec.run",
                 source="maads.tools",
                 attributes={
+                    # Keep the full executed code in the trace: agents now author it,
+                    # so it must be inspectable in trace.json / narrative.md.
+                    "code": _clip(code, _CODE_TRACE_LIMIT),
                     "code_bytes": len(code),
                     "substep": ctx.current_substep.get(),
                     "agent": ctx.current_maads_agent.get(),
@@ -403,7 +422,10 @@ def _patch_tools() -> None:
                         "ok": result.ok,
                         "return_code": result.return_code,
                         "timed_out": result.timed_out,
+                        "stdout": _clip(result.stdout, _IO_TRACE_LIMIT),
                         "stdout_len": len(result.stdout),
+                        # stderr only matters when something went wrong; keep it on failure.
+                        "stderr": "" if result.ok else _clip(result.stderr, _IO_TRACE_LIMIT),
                         "stderr_len": len(result.stderr),
                     },
                 )
