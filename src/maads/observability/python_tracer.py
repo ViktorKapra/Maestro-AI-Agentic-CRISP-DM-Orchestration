@@ -19,6 +19,16 @@ _DENYLIST = frozenset({
 })
 _MAX_DEPTH = int(os.getenv("MAADS_TRACE_PYTHON_DEPTH", "8"))
 
+# Handled KeyErrors from dependency env lookups (not MAADS bugs).
+_IGNORED_EXCEPTION_NAMES = frozenset({"KeyError"})
+
+
+def _skip_traced_exception(exc_type: type[BaseException], exc_val: BaseException) -> bool:
+    if getattr(exc_type, "__name__", "") not in _IGNORED_EXCEPTION_NAMES:
+        return False
+    msg = str(exc_val).strip("'\"")
+    return msg in {"MAX_TOKENS_PER_RUN"} or "MAX_TOKENS_PER_RUN" in msg
+
 
 class PythonTracer:
     def __init__(self, collector: TraceCollector) -> None:
@@ -73,6 +83,8 @@ class PythonTracer:
             )
         elif event == "exception" and self._call_stack:
             exc_type, exc_val, _ = arg
+            if _skip_traced_exception(exc_type, exc_val):
+                return self._trace
             self._collector.emit(
                 "exception",
                 name=getattr(exc_type, "__name__", "Exception"),

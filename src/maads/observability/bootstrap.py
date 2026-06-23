@@ -8,7 +8,8 @@ from pathlib import Path
 from maads.observability import context as ctx
 from maads.observability.collector import get_collector, reset_collector
 from maads.observability.crewai_listener import register_crewai_listener
-from maads.observability.exporter import export_trace
+from maads.observability.exporter import export_trace, write_trace_artifacts
+from maads.observability.llm_communications import reset_communication_registry
 from maads.observability.otel import setup_otel
 from maads.observability.patches import apply_patches
 
@@ -29,6 +30,7 @@ def auto_enable() -> None:
         return
 
     reset_collector()
+    reset_communication_registry()
     register_crewai_listener()
     setup_otel()
     apply_patches()
@@ -44,7 +46,22 @@ def begin_run(case_id: str | None, artifact_dir: Path) -> None:
     coll = get_collector()
     coll.start_run(case_id)
     ctx.current_case_id.set(case_id)
-    ctx.export_dir.set(artifact_dir / "trace")
+    trace_dir = artifact_dir / "trace"
+    ctx.export_dir.set(trace_dir)
+    flush_trace(trace_dir)
+
+
+def flush_trace(trace_dir: Path | None = None) -> Path | None:
+    """Persist the in-memory trace without closing the run (live updates)."""
+    if not is_enabled():
+        return None
+    out = trace_dir or ctx.export_dir.get()
+    if out is None:
+        return None
+    coll = get_collector()
+    if coll.run is None:
+        return None
+    return write_trace_artifacts(coll, out, finalize=False)
 
 
 def end_run(artifact_dir: Path) -> Path | None:

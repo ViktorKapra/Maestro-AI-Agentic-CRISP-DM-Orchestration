@@ -1,7 +1,3 @@
-"""maads — A Multi-Agent System for Automated Data Science.
+"""maads — Multi-Agent System for Automated Data Science (CRISP-DM over CrewAI)."""
 
-This is the starter scaffold. Read starter/README.md and docs/ARCHITECTURE.md
-before changing the contracts in this package.
-"""
-
-__version__ = "0.0.1"
+__version__ = "0.1.0"

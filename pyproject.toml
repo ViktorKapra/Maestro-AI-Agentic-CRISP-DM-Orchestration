@@ -26,14 +26,29 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4"]
+dev = ["pytest>=7.4", "coverage>=7.4"]
+dashboard = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
+
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-# src layout: the importable package is src/maads. Restrict discovery to maads*
-# so the separate src/crew_starter Ollama experiment is not packaged.
+# src layout: the importable package is src/maads.
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["maads*"]
+
+[tool.coverage.run]
+source = ["maads"]
+omit = [
+    "*/test_*",
+    "*/testing/*",
+    "*/observability/test_*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]

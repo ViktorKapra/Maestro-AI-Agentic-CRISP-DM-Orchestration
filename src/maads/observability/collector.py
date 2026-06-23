@@ -30,6 +30,7 @@ class TraceCollector:
         self._run: TraceRun | None = None
         self._t0_mono = time.monotonic()
         self._open_spans: dict[str, tuple[float, TraceEvent]] = {}
+        self._span_parents: dict[str, str | None] = {}
         self._otel_span_map: dict[int, str] = {}
 
     @property
@@ -85,15 +86,16 @@ class TraceCollector:
 
     def emit_start(self, event_type: str, *, span_key: str, **kwargs: Any) -> str:
         evt_id = self.emit(event_type, **kwargs)
-        token = current_event_id.set(evt_id)
+        # Store the parent explicitly — ContextVar reset tokens are invalid across
+        # asyncio/thread boundaries (CrewAI event bus), but .set() always works.
+        self._span_parents[span_key] = current_event_id.get()
+        current_event_id.set(evt_id)
         with self._lock:
             if self._run is not None:
                 for e in reversed(self._run.events):
                     if e.id == evt_id:
                         self._open_spans[span_key] = (time.monotonic(), e)
                         break
-        self._span_tokens: dict[str, Any] = getattr(self, "_span_tokens", {})
-        self._span_tokens[span_key] = token
         return evt_id
 
     def emit_end(
@@ -106,15 +108,16 @@ class TraceCollector:
         start_info = self._open_spans.pop(span_key, None)
         duration_ms = None
         parent_id = None
+        attrs = dict(attributes or {})
         if start_info:
             t0, start_evt = start_info
             duration_ms = round((time.monotonic() - t0) * 1000, 2)
             parent_id = start_evt.parent_id
-        span_tokens = getattr(self, "_span_tokens", {})
-        token = span_tokens.pop(span_key, None)
-        if token is not None:
-            current_event_id.reset(token)
-        attrs = dict(attributes or {})
+            for key in ("agent_name", "maads_agent", "role", "substep"):
+                if attrs.get(key) is None and start_evt.attributes.get(key) is not None:
+                    attrs[key] = start_evt.attributes[key]
+        if span_key in self._span_parents:
+            current_event_id.set(self._span_parents.pop(span_key))
         if duration_ms is not None:
             attrs.setdefault("duration_ms", duration_ms)
         return self.emit(

@@ -31,6 +31,14 @@ def render_timeline(run: TraceRun) -> str:
             extra = f" [{sub}] → {attrs.get('owner', '?')}" if sub else f" → {attrs.get('owner', '?')}"
         elif evt.type in {"llm.end", "crew.end"} and attrs.get("total_tokens"):
             extra = f" tokens={attrs['total_tokens']}"
+        comm = attrs.get("communication_id")
+        if comm and evt.type in {"llm.start", "llm.end", "crew.start", "crew.end"}:
+            extra += f" {comm}"
+        if evt.type == "llm.end":
+            pc = attrs.get("prompt_chars")
+            rc = attrs.get("response_chars")
+            if pc or rc:
+                extra += f" {pc or '?'}→{rc or '?'} chars"
         elif evt.type == "python.subprocess":
             extra = f" rc={attrs.get('return_code', '?')}"
         lines.append(f"T+{evt.ts_mono_ms:>7.0f}ms  {evt.type:<22} {label}{extra}{dur}")

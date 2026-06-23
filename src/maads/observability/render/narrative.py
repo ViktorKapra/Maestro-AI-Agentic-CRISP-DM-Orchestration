@@ -1,6 +1,12 @@
 """Deterministic narrative from trace events."""
 from __future__ import annotations
 
+from maads.observability.agent_labels import (
+    agent_role_from_crew,
+    format_agent_label,
+    maads_id_for_role,
+    resolve_maads_agent_id,
+)
 from maads.observability.schema import TraceRun
 
 
@@ -8,20 +14,52 @@ def _sentence_for_event(evt_type: str, name: str, attrs: dict) -> str | None:
     if evt_type == "run.start":
         return f"The workflow started for case `{attrs.get('case_id', 'unknown')}` at substep {attrs.get('substep', '?')}."
     if evt_type == "substep.dispatch":
+        owner = resolve_maads_agent_id(attrs, event_name=str(attrs.get("owner", ""))) or attrs.get("owner", "?")
+        owner_label = format_agent_label({"agent_name": owner, "role": attrs.get("owner_role")})
         return (
             f"The orchestrator dispatched substep **{attrs.get('substep')}** "
-            f"({name}) to agent `{attrs.get('owner', '?')}`."
+            f"({name}) to {owner_label}."
         )
     if evt_type == "crew.start":
-        return f"Agent `{attrs.get('agent_name', name)}` started a CrewAI crew for substep {attrs.get('substep', '?')}."
+        agent = format_agent_label(attrs, event_name=name)
+        comm = attrs.get("communication_id")
+        suffix = f" (comm `{comm}`)" if comm else ""
+        return f"{agent} started a CrewAI crew for substep {attrs.get('substep', '?')}{suffix}."
     if evt_type == "llm.start":
         model = attrs.get("model")
-        return f"An LLM call began{f' (model={model})' if model else ''}."
+        agent = format_agent_label(attrs, event_name=name)
+        comm = attrs.get("communication_id")
+        parts = [f"An LLM call began for {agent}"]
+        if model:
+            parts.append(f"model={model}")
+        if comm:
+            parts.append(f"comm=`{comm}`")
+        return " ".join(parts) + "."
     if evt_type == "llm.end":
         tokens = attrs.get("total_tokens")
-        return f"The LLM returned a response{f' using {tokens} tokens' if tokens else ''}."
+        comm = attrs.get("communication_id")
+        prompt_chars = attrs.get("prompt_chars")
+        response_chars = attrs.get("response_chars")
+        parts = [f"The LLM returned a response{f' using {tokens} tokens' if tokens else ''}"]
+        if comm:
+            parts.append(f"comm=`{comm}`")
+        if prompt_chars or response_chars:
+            parts.append(
+                f"({prompt_chars or '?'} prompt / {response_chars or '?'} response chars)"
+            )
+        return " ".join(parts) + "."
     if evt_type == "crew.end":
-        return f"The CrewAI crew completed for agent `{attrs.get('agent_name', '?')}`."
+        agent = format_agent_label(attrs, event_name=name)
+        parsed = attrs.get("parsed")
+        comm = attrs.get("communication_id")
+        if parsed is True:
+            suffix = " and returned valid JSON"
+        elif parsed is False:
+            suffix = " but JSON parsing failed"
+        else:
+            suffix = ""
+        comm_note = f" (comm `{comm}`)" if comm else ""
+        return f"The CrewAI crew completed for {agent}{suffix}{comm_note}."
     if evt_type == "python.subprocess":
         if attrs.get("return_code") is not None:
             return (

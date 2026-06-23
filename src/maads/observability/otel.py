@@ -13,6 +13,32 @@ from maads.observability.collector import TraceCollector, get_collector
 
 _instrumented = False
 
+_TRUNCATE_ATTR_PREFIXES = (
+    "llm.input_messages",
+    "agent.backstory",
+    "agent.goal",
+    "input.value",
+    "output.value",
+    "crew_agents",
+    "crew_tasks",
+)
+_MAX_ATTR_LEN = 200
+
+
+def _sanitize_otel_attrs(attrs: dict) -> dict[str, Any]:
+    """Drop huge prompt/backstory blobs from trace events."""
+    out: dict[str, Any] = {}
+    for k, v in attrs.items():
+        sk = str(k)
+        if any(sk.startswith(p) or p in sk for p in _TRUNCATE_ATTR_PREFIXES):
+            text = str(v)
+            out[sk] = f"<truncated len={len(text)}>"
+        elif isinstance(v, str) and len(v) > _MAX_ATTR_LEN:
+            out[sk] = v[:_MAX_ATTR_LEN] + "…"
+        else:
+            out[sk] = v
+    return out
+
 
 class CollectorSpanProcessor(SpanProcessor):
     """Mirror OTEL spans into the MAADS trace collector."""
@@ -29,7 +55,7 @@ class CollectorSpanProcessor(SpanProcessor):
             parent_span_id = span.parent.span_id
         parent_evt = self._collector.otel_parent_id(parent_span_id)
         name = getattr(span, "name", "span")
-        attrs = dict(getattr(span, "attributes", None) or {})
+        attrs = _sanitize_otel_attrs(dict(getattr(span, "attributes", None) or {}))
         evt_id = self._collector.emit(
             "otel.span.start",
             name=name,
@@ -48,7 +74,7 @@ class CollectorSpanProcessor(SpanProcessor):
         ctx = span.get_span_context()
         span_id = ctx.span_id
         parent_evt = self._span_evt.pop(span_id, None)
-        attrs = dict(span.attributes or {})
+        attrs = _sanitize_otel_attrs(dict(span.attributes or {}))
         duration_ms = None
         if span.end_time and span.start_time:
             duration_ms = (span.end_time - span.start_time) / 1_000_000
@@ -77,13 +103,17 @@ def setup_otel(collector: TraceCollector | None = None) -> TracerProvider:
     global _instrumented
     coll = collector or get_collector()
     resource = Resource.create({"service.name": "maads"})
-    provider = TracerProvider(resource=resource)
+    existing = trace.get_tracer_provider()
+    if isinstance(existing, TracerProvider):
+        provider = existing
+    else:
+        provider = TracerProvider(resource=resource)
+        trace.set_tracer_provider(provider)
+
     provider.add_span_processor(CollectorSpanProcessor(coll))
 
     if os.getenv("MAADS_TRACE_OTEL_CONSOLE", "").lower() in {"1", "true", "yes"}:
         provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
-
-    trace.set_tracer_provider(provider)
 
     if not _instrumented:
         try:
@@ -91,7 +121,7 @@ def setup_otel(collector: TraceCollector | None = None) -> TracerProvider:
 
             CrewAIInstrumentor().instrument(
                 tracer_provider=provider,
-                use_event_listener=True,
+                use_event_listener=False,
             )
         except Exception:
             # openinference may require a newer crewai; MaadsCrewAIListener still captures events.

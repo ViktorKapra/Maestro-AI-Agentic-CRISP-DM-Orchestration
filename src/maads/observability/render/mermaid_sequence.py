@@ -44,8 +44,13 @@ def render_sequence(run: TraceRun) -> str:
                 lines.append(f"    Orch->>Agent: dispatch {sub} ({owner})")
             continue
         src, msg = mapping
+        agent_tag = ""
+        if evt.attributes.get("agent_name") and evt.attributes.get("substep"):
+            agent_tag = f" {evt.attributes['agent_name']}@{evt.attributes['substep']}"
+        elif evt.attributes.get("maads_agent") and evt.attributes.get("substep"):
+            agent_tag = f" {evt.attributes['maads_agent']}@{evt.attributes['substep']}"
         if evt.type == "llm.end":
-            lines.append(f"    LLM-->>Crew: {msg}")
+            lines.append(f"    LLM-->>Crew: {msg}{agent_tag}")
         elif evt.type == "crew.end":
             lines.append(f"    Crew-->>Agent: {msg}")
         elif evt.type == "agent.complete":
@@ -58,7 +63,7 @@ def render_sequence(run: TraceRun) -> str:
         elif src == "Agent":
             lines.append(f"    Agent->>Crew: {msg}")
         elif src == "Crew":
-            lines.append(f"    Crew->>LLM: {msg}")
+            lines.append(f"    Crew->>LLM: {msg}{agent_tag}")
         elif src == "Task":
             lines.append(f"    Crew->>Task: {msg}")
     return "\n".join(lines) + "\n"

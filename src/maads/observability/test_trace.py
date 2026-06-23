@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from maads.config import load_case_config
-from maads.observability.bootstrap import auto_enable, begin_run, end_run
+from maads.observability.bootstrap import auto_enable, begin_run, end_run, flush_trace
 from maads.observability.collector import reset_collector
-from maads.observability.exporter import export_trace
+from maads.observability.exporter import export_trace, write_trace_artifacts
 from maads.observability.render.agent_interaction import render_agent_interaction
 from maads.observability.render.call_tree import render_call_tree
 from maads.observability.render.mermaid_flowchart import render_flowchart
@@ -21,6 +21,7 @@ from maads.observability.render.timeline import render_timeline
 from maads.observability.schema import TraceEvent, TraceRun
 from maads.orchestrator import Orchestrator
 from maads.state import CrispDMState
+from maads.testing.fake_llm import fake_llm_response
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -66,6 +67,22 @@ def _sample_run() -> TraceRun:
     return TraceRun(run_id="test-run", case_id="titanic", events=events)
 
 
+def test_emit_end_survives_different_context():
+    """CrewAI callbacks can end spans outside the context where they started."""
+    import contextvars
+
+    coll = reset_collector()
+    coll.start_run("titanic")
+    coll.emit_start("llm.start", span_key="crewai.llm.x", name="LLM")
+
+    other_ctx = contextvars.copy_context()
+    other_ctx.run(lambda: coll.emit_end("llm.end", span_key="crewai.llm.x"))
+
+    run = coll.to_trace_run()
+    assert len(run.events) == 2
+    assert run.events[1].type == "llm.end"
+
+
 def test_collector_parent_child():
     coll = reset_collector()
     coll.start_run("titanic")
@@ -88,6 +105,28 @@ def test_renderers_produce_output():
     assert "workflow started" in render_narrative(run).lower()
 
 
+def test_flush_trace_keeps_run_open(tmp_path: Path):
+    coll = reset_collector()
+    coll.start_run("titanic")
+    coll.emit("run.start", name="Orchestrator.run")
+    out = tmp_path / "trace"
+
+    write_trace_artifacts(coll, out, finalize=False)
+    assert (out / "trace.json").exists()
+    assert coll.run is not None
+    assert coll.run.ended_at is None
+
+    coll.emit("substep.dispatch", name="1.1", attributes={"substep": "1.1"})
+    flush_trace(out)
+    data = json.loads((out / "trace.json").read_text())
+    assert len(data["events"]) == 2
+    assert data["ended_at"] is None
+
+    export_trace(coll, out)
+    data = json.loads((out / "trace.json").read_text())
+    assert data["ended_at"] is not None
+
+
 def test_export_writes_all_artefacts(tmp_path: Path):
     coll = reset_collector()
     coll.start_run("titanic")
@@ -108,21 +147,7 @@ def test_export_writes_all_artefacts(tmp_path: Path):
 
 @patch("maads.agents.run_json_task")
 def test_integration_orchestrator_trace(mock_llm, tmp_path: Path):
-    def _fake_llm(agent_name, instruction, state, schema_hint):
-        if state.substep == "1.1":
-            return {
-                "background": "test",
-                "business_objectives": "obj",
-                "business_success_criteria": "crit",
-            }
-        if state.substep == "1.3":
-            return {
-                "data_mining_goals": "goal",
-                "data_mining_success_criteria": "crit",
-            }
-        return {}
-
-    mock_llm.side_effect = _fake_llm
+    mock_llm.side_effect = fake_llm_response
 
     auto_enable()
     cfg = load_case_config(REPO_ROOT / "configs" / "titanic.yaml")

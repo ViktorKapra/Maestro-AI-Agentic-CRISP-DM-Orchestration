@@ -1,0 +1,153 @@
+import { useEffect, useMemo, useState } from "react";
+import type { RunStatus, TabId } from "./shared/types";
+import { useCases } from "./hooks/useCasePolling";
+import { Overview } from "./pages/Overview";
+import { Communications } from "./pages/Communications";
+import { Architecture } from "./pages/Architecture";
+import { Timeline } from "./pages/Timeline";
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "communications", label: "Communications" },
+  { id: "architecture", label: "Architecture" },
+  { id: "timeline", label: "Timeline" },
+];
+
+function statusDot(status: RunStatus | undefined) {
+  if (status === "running") return "bg-status-running";
+  if (status === "halted") return "bg-status-halted";
+  return "bg-status-complete";
+}
+
+function statusLabel(status: RunStatus | undefined) {
+  if (status === "running") return "Running";
+  if (status === "halted") return "Halted";
+  if (status === "complete") return "Complete";
+  return "Unknown";
+}
+
+export default function App() {
+  const { data: cases, isLoading, error } = useCases();
+  const [caseId, setCaseId] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabId>("overview");
+  const [highlightComm, setHighlightComm] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("case");
+    if (fromUrl) setCaseId(fromUrl);
+  }, []);
+
+  useEffect(() => {
+    if (!caseId && cases?.length) {
+      setCaseId(cases[0].case_id);
+    }
+  }, [cases, caseId]);
+
+  const activeCase = useMemo(
+    () => cases?.find((c) => c.case_id === caseId),
+    [cases, caseId],
+  );
+
+  const openComm = (commId: string) => {
+    setHighlightComm(commId);
+    setTab("communications");
+    setTimeout(() => {
+      document.getElementById(`comm-${commId}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
+  };
+
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-red-400">Cannot reach API — is the dashboard server running?</p>
+        <p className="text-sm text-slate-500 mt-2">
+          Run: <code className="text-accent-muted">python -m maads dashboard --no-open</code>
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <header className="border-b border-surface-border bg-surface-raised px-6 py-4">
+        <div className="flex flex-wrap items-center gap-4 justify-between max-w-7xl mx-auto">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold tracking-tight">
+              MAADS Trace
+            </h1>
+            {activeCase && (
+              <span className="flex items-center gap-2 text-sm">
+                <span
+                  className={`h-2 w-2 rounded-full ${statusDot(activeCase.status)}`}
+                />
+                {statusLabel(activeCase.status)}
+              </span>
+            )}
+          </div>
+
+          <select
+            value={caseId ?? ""}
+            onChange={(e) => setCaseId(e.target.value)}
+            disabled={isLoading}
+            className="rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-sm"
+          >
+            {!cases?.length && <option value="">No cases</option>}
+            {cases?.map((c) => (
+              <option key={c.case_id} value={c.case_id}>
+                {c.case_id} ({c.status})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {activeCase && (
+          <p className="text-sm text-slate-400 mt-2 max-w-7xl mx-auto">
+            Phase {activeCase.phase} — {activeCase.phase_name} ·{" "}
+            {activeCase.completed_substeps}/{activeCase.total_substeps} substeps
+          </p>
+        )}
+
+        <nav className="flex gap-1 mt-4 max-w-7xl mx-auto">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={`rounded-lg px-4 py-2 text-sm transition-colors ${
+                tab === t.id
+                  ? "bg-accent text-white"
+                  : "text-slate-400 hover:bg-surface-border hover:text-slate-200"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
+        {!caseId ? (
+          <p className="text-slate-500">Select a case or run the pipeline first.</p>
+        ) : (
+          <>
+            {tab === "overview" && <Overview caseId={caseId} />}
+            {tab === "communications" && (
+              <Communications
+                caseId={caseId}
+                highlightCommId={highlightComm}
+              />
+            )}
+            {tab === "architecture" && <Architecture caseId={caseId} />}
+            {tab === "timeline" && (
+              <Timeline caseId={caseId} onOpenComm={openComm} />
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  );
+}

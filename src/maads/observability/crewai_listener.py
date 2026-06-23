@@ -48,7 +48,9 @@ from crewai.events.types.tool_usage_events import (
 )
 
 from maads.observability import context as ctx
+from maads.observability.agent_labels import agent_role_from_crew, maads_id_for_role
 from maads.observability.collector import get_collector
+from maads.observability.llm_communications import get_communication_registry
 
 
 def _agent_role(agent: Any) -> str:
@@ -57,14 +59,28 @@ def _agent_role(agent: Any) -> str:
 
 def _safe_attrs(event: Any, **extra: Any) -> dict[str, Any]:
     attrs = dict(extra)
+    maads = ctx.current_maads_agent.get()
+    crew_role = agent_role_from_crew(event) or getattr(event, "agent_role", None)
+    crew_maads = maads_id_for_role(crew_role) if crew_role else None
+    agent_id = maads or crew_maads
     attrs["substep"] = ctx.current_substep.get()
-    attrs["maads_agent"] = ctx.current_maads_agent.get()
+    attrs["maads_agent"] = agent_id
+    if agent_id:
+        attrs["agent_name"] = agent_id
+    if crew_role:
+        attrs["role"] = crew_role
     if hasattr(event, "type"):
         attrs["crewai_type"] = event.type
+    call_id = getattr(event, "call_id", None)
+    if call_id:
+        attrs["call_id"] = call_id
     return attrs
 
 
 def _span_key(prefix: str, event: Any) -> str:
+    call_id = getattr(event, "call_id", None)
+    if call_id:
+        return f"{prefix}.{call_id}"
     fp = getattr(event, "source_fingerprint", None)
     if fp:
         return f"{prefix}.{fp}"
@@ -240,29 +256,74 @@ class MaadsCrewAIListener(BaseEventListener):
         @bus.on(LLMCallStartedEvent)
         def on_llm_start(_src: Any, event: LLMCallStartedEvent) -> None:
             key = _span_key("crewai.llm", event)
-            get_collector().emit_start(
+            attrs = _safe_attrs(
+                event,
+                model=str(getattr(event, "model", "")),
+            )
+            evt_id = get_collector().emit_start(
                 "llm.start",
                 span_key=key,
                 name="LLMCall",
                 source="crewai",
-                attributes=_safe_attrs(
-                    event,
-                    model=str(getattr(event, "model", "")),
-                ),
+                attributes=attrs,
             )
+            comm_id = get_communication_registry().enrich_start(
+                call_id=getattr(event, "call_id", None),
+                agent_role=getattr(event, "agent_role", None),
+                task_id=getattr(event, "task_id", None),
+                model=str(getattr(event, "model", "")) or None,
+                messages=getattr(event, "messages", None),
+                trace_event_id=evt_id,
+            )
+            if comm_id:
+                attrs["communication_id"] = comm_id
+                with get_collector()._lock:
+                    run = get_collector().run
+                    if run is not None:
+                        for e in reversed(run.events):
+                            if e.id == evt_id:
+                                e.attributes["communication_id"] = comm_id
+                                break
 
         @bus.on(LLMCallCompletedEvent)
         def on_llm_end(_src: Any, event: LLMCallCompletedEvent) -> None:
-            usage = getattr(event, "token_usage", None)
+            usage = getattr(event, "usage", None) or getattr(event, "token_usage", None)
             tokens = None
+            usage_dict: dict[str, Any] = {}
             if usage is not None:
-                tokens = getattr(usage, "total_tokens", None)
+                if isinstance(usage, dict):
+                    usage_dict = usage
+                    tokens = usage.get("total_tokens")
+                else:
+                    tokens = getattr(usage, "total_tokens", None)
+                    usage_dict = {
+                        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                        "completion_tokens": getattr(usage, "completion_tokens", None),
+                        "total_tokens": tokens,
+                    }
             key = _span_key("crewai.llm", event)
-            get_collector().emit_end(
+            attrs = _safe_attrs(event, total_tokens=tokens)
+            comm_id = get_communication_registry().enrich_end(
+                call_id=getattr(event, "call_id", None),
+                agent_role=getattr(event, "agent_role", None),
+                response=getattr(event, "response", None),
+                usage=usage_dict or None,
+                finish_reason=getattr(event, "finish_reason", None),
+            )
+            if comm_id:
+                attrs["communication_id"] = comm_id
+                sizes = get_communication_registry().preview_sizes(comm_id)
+                attrs.update(sizes)
+            evt_id = get_collector().emit_end(
                 "llm.end",
                 span_key=key,
-                attributes=_safe_attrs(event, total_tokens=tokens),
+                attributes=attrs,
             )
+            if comm_id and evt_id:
+                get_communication_registry().enrich_end(
+                    call_id=getattr(event, "call_id", None),
+                    trace_event_id=evt_id,
+                )
 
         @bus.on(LLMCallFailedEvent)
         def on_llm_fail(_src: Any, event: LLMCallFailedEvent) -> None:

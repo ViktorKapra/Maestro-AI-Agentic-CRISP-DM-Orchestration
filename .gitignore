@@ -221,3 +221,7 @@ __marimo__/
 artifacts/
 data/
 src/artifacts/*
+
+# Dashboard frontend build artifacts
+dashboard/node_modules/
+dashboard/dist/

@@ -159,7 +159,7 @@ class DataUnderstanding(BaseModel):
 class DataPreparation(BaseModel):
     rationale_for_inclusion_exclusion: dict[str, Any] | None = None  # 3.1
     data_cleaning_report: dict[str, Any] | None = None               # 3.2
-    derived_attributes: list[str] = Field(default_factory=list)      # 3.3
+    derived_attributes: dict[str, Any] | None = None                   # 3.3
     generated_records: dict[str, Any] | None = None                  # 3.3
     merged_data: dict[str, Any] | None = None                        # 3.4
     reformatted_data: dict[str, Any] | None = None                   # 3.5
@@ -252,6 +252,8 @@ class CrispDMState(BaseModel):
         """
         if substep == "1.3" and self.bu.business_objectives is None:
             return False
+        if substep == "1.4" and self.bu.data_mining_goals is None:
+            return False
         if substep == "2.3" and self.du.data_description_report is None:
             return False
         if substep == "3.1" and self.du.data_quality_report is None:
@@ -293,7 +295,9 @@ class CrispDMState(BaseModel):
             base["recent_log"] = _trim_log(self.log, n=8)
             base["latest_quality_blockers"] = _quality_blockers(self.du.data_quality_report)
             base["latest_model_assessment"] = _latest_model_assessment(self.md)
-            base["business_goal_met"] = self.ev.assessment_of_dm_results is not None
+            base["outputs_status"] = _pm_outputs_status(self)
+            assessment = self.ev.assessment_of_dm_results or {}
+            base["business_goal_met"] = bool(assessment.get("meets"))
         elif agent_name == "domain":
             base["bu"] = self.bu.model_dump(exclude_none=True)
             base["du_so_far"] = self.du.model_dump(exclude_none=True)
@@ -316,14 +320,50 @@ class CrispDMState(BaseModel):
             base["dataset"] = self.dp.dataset
             base["sample_submission_csv"] = self.config.data.sample_submission_csv
             base["data_description_report"] = self.du.data_description_report
-        elif agent_name == "validator":
-            base["models"] = [m.model_dump() for m in self.md.models]
-            base["chosen_model"] = (
-                self.md.chosen_model.model_dump() if self.md.chosen_model else None
-            )
-            base["data_description_report"] = self.du.data_description_report
-            base["test_design"] = self.md.test_design
         return base
+
+
+def next_substep(state: "CrispDMState") -> str | None:
+    """Return the substep after `state.substep`, or None past 6.4."""
+    phase = state.phase
+    subs = SUBSTEPS[phase]
+    i = subs.index(state.substep)
+    if i + 1 < len(subs):
+        return subs[i + 1]
+    next_phase = int(phase) + 1
+    if next_phase > int(Phase.DEPLOYMENT):
+        return None
+    return SUBSTEPS[Phase(next_phase)][0]
+
+
+def _pm_outputs_status(state: "CrispDMState") -> dict[str, bool]:
+    bu, du, dp, md, ev, dep = state.bu, state.du, state.dp, state.md, state.ev, state.dep
+    phase_4_model_ok = any(
+        m.cv_score is not None and m.assessment for m in md.models
+    )
+    return {
+        "phase_1_ready": bool(
+            bu.business_objectives
+            and bu.business_success_criteria
+            and bu.data_mining_goals
+            and bu.project_plan
+        ),
+        "phase_2_ready": bool(
+            du.data_description_report
+            and du.data_exploration_report
+            and du.data_quality_report
+        ),
+        "phase_3_ready": bool(dp.dataset),
+        "phase_4_ready": bool(phase_4_model_ok and md.chosen_model),
+        "phase_5_ready": bool(
+            ev.assessment_of_dm_results and ev.review_of_process and ev.decision
+        ),
+        "phase_6_ready": bool(
+            dep.submission_path
+            and dep.final_report_path
+            and dep.experience_documentation
+        ),
+    }
 
 
 # ── Helpers used by view_for ───────────────────────────────────────────────
