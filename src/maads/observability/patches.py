@@ -15,6 +15,27 @@ def _subprocess_key(code: str) -> str:
     return hashlib.md5(code.encode(), usedforsecurity=False).hexdigest()[:8]
 
 
+def _flush_trace_snapshot() -> None:
+    """Write the current trace to disk without closing the run."""
+    out = ctx.export_dir.get()
+    if out is None:
+        from maads.run_status import flush_status
+
+        flush_status()
+        return
+    coll = get_collector()
+    if coll.run is None:
+        from maads.run_status import flush_status
+
+        flush_status()
+        return
+    from maads.observability.exporter import write_trace_artifacts
+    from maads.run_status import flush_status
+
+    write_trace_artifacts(coll, out, finalize=False)
+    flush_status()
+
+
 def apply_patches() -> None:
     _patch_orchestrator()
     _patch_crew()
@@ -101,6 +122,9 @@ def _patch_orchestrator() -> None:
                 "phase": int(self.state.phase),
             },
         )
+        from maads.progress import on_substep_start
+
+        on_substep_start(substep, int(self.state.phase), owner)
         coll.emit(
             "agent.activate",
             name=owner,
@@ -129,6 +153,10 @@ def _patch_orchestrator() -> None:
                 span_key=f"substep.{substep}",
                 attributes={"substep": substep},
             )
+            from maads.progress import on_substep_done
+
+            on_substep_done(substep)
+            _flush_trace_snapshot()
 
     @functools.wraps(orig_advance)
     def traced_advance(self) -> bool:
@@ -151,6 +179,9 @@ def _patch_orchestrator() -> None:
 
     @functools.wraps(orig_loop)
     def traced_loop(self, target_phase: int, reason: str, label: str = "?") -> None:
+        from maads.progress import on_loop
+
+        on_loop(label, target_phase, reason)
         get_collector().emit(
             "loop",
             name=f"loop {label}",
@@ -211,6 +242,10 @@ def _patch_crew() -> None:
                 "instruction_preview": instruction[:200],
             },
         )
+        from maads.progress import on_crew_end, on_crew_start
+
+        on_crew_start(agent_name, substep)
+        _flush_trace_snapshot()
         try:
             result = orig(agent_name, instruction, state, schema_hint)
             coll.emit_end(
@@ -218,6 +253,8 @@ def _patch_crew() -> None:
                 span_key=f"crew.{substep}.{agent_name}",
                 attributes={"agent_name": agent_name, "substep": substep, "parsed": result is not None},
             )
+            on_crew_end(agent_name, parsed=result is not None)
+            _flush_trace_snapshot()
             return result
         except Exception as exc:
             coll.emit(
@@ -231,6 +268,8 @@ def _patch_crew() -> None:
                 span_key=f"crew.{substep}.{agent_name}",
                 attributes={"agent_name": agent_name, "error": str(exc)},
             )
+            on_crew_end(agent_name, parsed=False)
+            _flush_trace_snapshot()
             raise
 
     traced_run_json_task._maads_traced = True  # type: ignore[attr-defined]
@@ -261,6 +300,9 @@ def _patch_tools() -> None:
                     "agent": ctx.current_maads_agent.get(),
                 },
             )
+            from maads.progress import on_code_end, on_code_start
+
+            on_code_start()
             try:
                 result = orig_pyexec(self, code, extra_env)
                 coll.emit_end(
@@ -274,6 +316,7 @@ def _patch_tools() -> None:
                         "stderr_len": len(result.stderr),
                     },
                 )
+                on_code_end(ok=result.ok)
                 return result
             except Exception as exc:
                 coll.emit(
@@ -283,6 +326,7 @@ def _patch_tools() -> None:
                     attributes={"message": str(exc)},
                 )
                 coll.emit_end("python.subprocess", span_key=key, attributes={"error": str(exc)})
+                on_code_end(ok=False)
                 raise
 
         traced_pyexec_run._maads_traced = True  # type: ignore[attr-defined]

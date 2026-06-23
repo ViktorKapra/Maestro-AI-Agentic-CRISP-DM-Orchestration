@@ -1,70 +1,78 @@
-# CrewAI Starter
+# maads — Multi-Agent Automated Data Science
 
-A minimal, first-run [CrewAI](https://docs.crewai.com/) project. Two agents — a
-researcher and a writer — cooperate on a topic you give them. The point is to get
-CrewAI installed and running end-to-end before building the full five-agent
-CRISP-DM system described in the case (see `D:\SummerSchool`).
+A five-agent system that walks Kaggle-style problems through the **CRISP-DM 1.0**
+process model. The **Project Manager** orchestrates each turn; specialist agents
+(domain, data engineer, data scientist, developer) own their substeps. CrewAI
+powers LLM calls; a typed shared state (`CrispDMState`) and trace tooling make
+runs observable.
 
-## What is CrewAI, in one paragraph
-
-CrewAI is a Python framework for building **teams of LLM agents**. You define
-*agents* (each a role the model plays), give them *tasks*, and group them into a
-*crew* that runs the tasks in order. The framework handles talking to the LLM,
-passing each task's output to the next, and tracking token usage — so you focus on
-*what* the agents do, not the plumbing.
+See [`docs/plan.md`](docs/plan.md) for the canonical roadmap and audit notes.
 
 ## Project layout
 
 ```
-requirements.txt              dependencies (crewai + python-dotenv)
-.env.example                  template for your API key — copy to .env
-src/crew_starter/
-  config/agents.yaml          the two agents (role / goal / backstory)
-  config/tasks.yaml           the two tasks (what each agent produces)
-  crew.py                     wires agents + tasks into a runnable Crew
-  main.py                     entry point: loads .env and runs the crew
+configs/                  Case YAML files (titanic, house_prices, disaster_tweets)
+data/                     Downloaded competition CSVs
+artifacts/<case>/         Per-run outputs (submission, trace, final_state.json)
+src/maads/                Installable Python package
+  orchestrator.py         CRISP-DM state machine
+  agents.py               Five agent wrappers
+  crew.py                 CrewAI LLM seam
+  observability/          Trace export (timeline, narrative, diagrams)
 ```
 
-## Setup (Windows, PowerShell)
+## Setup
 
-```powershell
-# 1. Create and activate a virtual environment (isolates this project's packages)
+```bash
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
 
-# 2. Install dependencies
-pip install -r requirements.txt
+pip install -e ".[dev]"
 
-# 3. Add your OpenAI key
-Copy-Item .env.example .env
-#   then open .env and paste your real OPENAI_API_KEY
+cp .env.example .env
+# Set OPENAI_API_KEY and/or MODEL (see .env.example for Ollama vs cloud)
 ```
 
-> On macOS/Linux the only differences are `source .venv/bin/activate` and
-> `cp .env.example .env`.
+Python **3.10–3.13** required (`requires-python` in `pyproject.toml`).
 
-## Run it
+## Download data
 
-```powershell
-cd src
-python -m crew_starter.main
-# or give it your own topic:
-python -m crew_starter.main "gradient boosting"
+```bash
+python -m maads data download --case titanic
 ```
 
-You'll see each agent "think" out loud (that's `verbose=True`), then a final
-summary printed at the end.
+## Run the pipeline
 
-## Where to go next
+```bash
+python -m maads run --case titanic
+```
 
-This starter is intentionally tiny. The actual case asks for **five agents**
-walking a Kaggle problem through CRISP-DM. When you're comfortable with how
-agents, tasks, and the crew fit together here, grow this into that system:
-add the remaining roles to `agents.yaml`, give them tasks, and introduce the
-loop logic the case describes.
+While running, watch `artifacts/titanic/status.json` or the stderr progress bar.
+After completion, inspect `artifacts/titanic/trace/` for timelines and diagrams.
 
-## Note on Python version
+Use `--quiet` or `MAADS_PROGRESS=0` to disable the live progress bar.
 
-CrewAI currently supports Python 3.10–3.13. If `pip install` fails on a newer
-interpreter (e.g. 3.14), create the venv with a 3.13 build instead:
-`py -3.13 -m venv .venv`.
+## Tests
+
+```bash
+# Fast path-coverage run (mocked LLM, ~1 min)
+MAADS_TRACE=0 coverage run -m pytest src/maads/test_path_coverage.py -q
+coverage report --show-missing
+
+# Full test suite
+pytest src/maads/
+```
+
+## CLI reference
+
+| Command | Description |
+|---------|-------------|
+| `maads run --case <name>` | Run from `configs/<name>.yaml` |
+| `maads run --config <path>` | Run from an explicit config file |
+| `maads data download --case <name>` | Download bundled case data |
+| `maads data download --competition <slug>` | Download any Kaggle competition |
+
+## Environment variables
+
+See [`.env.example`](.env.example) for `MODEL`, `MAX_TOKENS_PER_RUN`, `MAADS_TRACE`,
+`MAADS_PROGRESS`, and Ollama settings.

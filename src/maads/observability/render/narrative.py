@@ -1,6 +1,12 @@
 """Deterministic narrative from trace events."""
 from __future__ import annotations
 
+from maads.observability.agent_labels import (
+    agent_role_from_crew,
+    format_agent_label,
+    maads_id_for_role,
+    resolve_maads_agent_id,
+)
 from maads.observability.schema import TraceRun
 
 
@@ -8,12 +14,15 @@ def _sentence_for_event(evt_type: str, name: str, attrs: dict) -> str | None:
     if evt_type == "run.start":
         return f"The workflow started for case `{attrs.get('case_id', 'unknown')}` at substep {attrs.get('substep', '?')}."
     if evt_type == "substep.dispatch":
+        owner = resolve_maads_agent_id(attrs, event_name=str(attrs.get("owner", ""))) or attrs.get("owner", "?")
+        owner_label = format_agent_label({"agent_name": owner, "role": attrs.get("owner_role")})
         return (
             f"The orchestrator dispatched substep **{attrs.get('substep')}** "
-            f"({name}) to agent `{attrs.get('owner', '?')}`."
+            f"({name}) to {owner_label}."
         )
     if evt_type == "crew.start":
-        return f"Agent `{attrs.get('agent_name', name)}` started a CrewAI crew for substep {attrs.get('substep', '?')}."
+        agent = format_agent_label(attrs, event_name=name)
+        return f"{agent} started a CrewAI crew for substep {attrs.get('substep', '?')}."
     if evt_type == "llm.start":
         model = attrs.get("model")
         return f"An LLM call began{f' (model={model})' if model else ''}."
@@ -21,7 +30,15 @@ def _sentence_for_event(evt_type: str, name: str, attrs: dict) -> str | None:
         tokens = attrs.get("total_tokens")
         return f"The LLM returned a response{f' using {tokens} tokens' if tokens else ''}."
     if evt_type == "crew.end":
-        return f"The CrewAI crew completed for agent `{attrs.get('agent_name', '?')}`."
+        agent = format_agent_label(attrs, event_name=name)
+        parsed = attrs.get("parsed")
+        if parsed is True:
+            suffix = " and returned valid JSON"
+        elif parsed is False:
+            suffix = " but JSON parsing failed"
+        else:
+            suffix = ""
+        return f"The CrewAI crew completed for {agent}{suffix}."
     if evt_type == "python.subprocess":
         if attrs.get("return_code") is not None:
             return (

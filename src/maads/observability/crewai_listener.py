@@ -48,6 +48,7 @@ from crewai.events.types.tool_usage_events import (
 )
 
 from maads.observability import context as ctx
+from maads.observability.agent_labels import agent_role_from_crew, maads_id_for_role
 from maads.observability.collector import get_collector
 
 
@@ -57,8 +58,16 @@ def _agent_role(agent: Any) -> str:
 
 def _safe_attrs(event: Any, **extra: Any) -> dict[str, Any]:
     attrs = dict(extra)
+    maads = ctx.current_maads_agent.get()
+    crew_role = agent_role_from_crew(event)
+    crew_maads = maads_id_for_role(crew_role)
+    agent_id = maads or crew_maads
     attrs["substep"] = ctx.current_substep.get()
-    attrs["maads_agent"] = ctx.current_maads_agent.get()
+    attrs["maads_agent"] = agent_id
+    if agent_id:
+        attrs["agent_name"] = agent_id
+    if crew_role:
+        attrs["role"] = crew_role
     if hasattr(event, "type"):
         attrs["crewai_type"] = event.type
     return attrs

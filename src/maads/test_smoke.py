@@ -102,3 +102,71 @@ def test_case_shorthands_are_just_a_convenience():
     import inspect
     sig = inspect.signature(download_kaggle_competition)
     assert "slug" in sig.parameters
+
+import pytest
+
+from maads.prompts import AGENT_PROMPTS
+from maads.state import next_substep
+
+
+@pytest.mark.parametrize("agent_id", list(AGENT_PROMPTS))
+def test_agent_identity_embedded(agent_id):
+    """Each registered agent has stable embedded role/goal/backstory."""
+    p = AGENT_PROMPTS[agent_id]
+    assert p["role"] and p["goal"] and p["backstory"]
+    for token in ("{case_id}", "{state_view}", "{phase}", "{substep}"):
+        assert token not in p["backstory"]
+    if agent_id == "domain":
+        assert "{dataset_name}" in p["role"]
+    if agent_id == "data_engineer":
+        assert p["role"] == "Senior Data Engineer"
+        assert "CRISP-DM" in p["backstory"]
+        assert "MODELING BOUNDARY" not in p["backstory"]
+    if agent_id == "data_scientist":
+        assert p["role"] == "Data Scientist"
+        assert "MODELING-ORIENTED EXPLORATION" in p["backstory"]
+        assert "MODELING BOUNDARY" not in p["backstory"]
+
+
+def test_pm_backstory_contains_directive_schema():
+    backstory = AGENT_PROMPTS["pm"]["backstory"]
+    assert "four loop contours" in backstory
+    assert '"action": "advance | loop_back | halt"' in backstory
+
+
+def test_view_for_pm_outputs_status():
+    cfg = load_case_config(REPO_ROOT / "configs" / "titanic.yaml")
+    state = CrispDMState.from_config(cfg)
+    view = state.view_for("pm")
+    assert "outputs_status" in view
+    assert view["outputs_status"]["phase_1_ready"] is False
+    state.bu.business_objectives = "obj"
+    state.bu.business_success_criteria = "crit"
+    state.bu.data_mining_goals = "goals"
+    state.bu.project_plan = ["step"]
+    view = state.view_for("pm")
+    assert view["outputs_status"]["phase_1_ready"] is True
+
+
+def test_phase_6_ready_requires_experience_documentation():
+    cfg = load_case_config(REPO_ROOT / "configs" / "titanic.yaml")
+    state = CrispDMState.from_config(cfg)
+    state.dep.submission_path = "/artifacts/titanic/submission.csv"
+    state.dep.final_report_path = "/artifacts/titanic/final_report.md"
+    view = state.view_for("pm")
+    assert view["outputs_status"]["phase_6_ready"] is False
+    state.dep.experience_documentation = "Lessons from the run."
+    view = state.view_for("pm")
+    assert view["outputs_status"]["phase_6_ready"] is True
+
+
+def test_next_substep_walks_phases():
+    cfg = load_case_config(REPO_ROOT / "configs" / "titanic.yaml")
+    state = CrispDMState.from_config(cfg)
+    assert next_substep(state) == "1.2"
+    state.substep = "1.4"
+    assert next_substep(state) == "2.1"
+    state.phase = Phase.DEPLOYMENT
+    state.substep = "6.4"
+    assert next_substep(state) is None
+

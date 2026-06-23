@@ -16,6 +16,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from maads.paths import resolve_path
+
 
 # Convenience shorthands for the three demonstration cases.
 # To add a new competition, just write configs/<name>.yaml and call
@@ -81,5 +83,5 @@ def download_case_data(case: str, data_dir: Path | None = None) -> Path:
             "`download_kaggle_competition(slug, out_dir)`."
         )
     slug = CASE_SHORTHANDS[case]
-    base = Path(data_dir) if data_dir is not None else Path("data")
+    base = resolve_path(data_dir) if data_dir is not None else resolve_path("data")
     return download_kaggle_competition(slug, base / case)
