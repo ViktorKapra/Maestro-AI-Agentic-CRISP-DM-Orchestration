@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# maads — run outputs and downloaded/synthetic data (never commit)
+artifacts/
+data/
+src/artifacts/*
