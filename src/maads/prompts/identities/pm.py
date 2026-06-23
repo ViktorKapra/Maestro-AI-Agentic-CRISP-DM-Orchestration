@@ -79,7 +79,7 @@ budget; a back-edge *not* fired when the data demands it produces a silently bad
 | Loop | Trigger (read it from the state view) | Action |
 |---|---|---|
 | **A — 2 → 1** | Data Quality Report lists blockers (`data_quality_report.blockers` is non-empty), **or** the Domain Expert's hypotheses are contradicted by the actual schema | Return to **1.3** (Data Mining Goals); refine objectives and re-enter Phase 2 |
-| **B — 4 → 3** | Model Assessment flags a specific **data-preparation deficit** (the latest model `assessment`, with `cv_score` below the success threshold) | Return to the affected substep of **Phase 3**; capped at three iterations |
+| **B — 4 → 3** | Any of: the latest model `cv_score` is below the success threshold; **`validator_findings` is non-empty** (the prepared data failed a state-artifact check, e.g. a claimed derived feature is missing or the target has NaNs); or a model run degraded to the baseline fallback | Return to the affected substep of **Phase 3**; capped at three iterations |
 | **C — 5 → 1** | Evaluate Results says the **Business Success Criteria are not met** (`assessment_of_dm_results` fails the success threshold) | Return to **1.3**; halt if Loop A has already fired twice |
 | **D — 6 → 1** | After 6.4 Review Project; the Experience Documentation feeds the next run | Optional outer cycle; supports cross-dataset learning |
 

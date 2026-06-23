@@ -1,0 +1,32 @@
+# Titanic — forced-loop demo. Identical to titanic.yaml except the success
+# threshold is set unreasonably high so the model can never meet it, which
+# forces Loop C (5 -> 1) / Loop B (4 -> 3) to fire and populate loop_history.
+# Use to demonstrate the iterative CRISP-DM back-edges end to end.
+case_id: titanic
+kaggle_competition: titanic
+problem_statement: |
+  Predict which passengers survived the 1912 sinking of the Titanic.
+  Train a model on a small set of labelled passenger records and produce
+  predictions for the held-out test set.
+
+problem_type: binary_classification
+target_column: Survived
+id_column: PassengerId
+evaluation_metric: accuracy
+
+data:
+  train_csv: data/titanic/train.csv
+  test_csv: data/titanic/test.csv
+  sample_submission_csv: data/titanic/gender_submission.csv
+
+feature_hints:
+  numeric_with_missing: [Age, Fare]
+  categorical: [Pclass, Sex, Embarked]
+  ordinal: []
+  text_free: [Name, Ticket, Cabin]
+  high_missing: [Cabin]
+
+# Deliberately unreachable threshold -> the 5 -> 1 / 4 -> 3 loops must fire.
+success_criterion:
+  metric: accuracy
+  threshold: 0.99
