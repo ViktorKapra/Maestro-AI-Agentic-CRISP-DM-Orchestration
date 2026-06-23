@@ -5,6 +5,7 @@ Subcommands:
     data download --competition <slug>  Download any Kaggle competition.
     run --case <name>                   Run the CrewAI-backed CRISP-DM pipeline.
     run --config <path>                 Run from an explicit case config YAML.
+    dashboard                           Web UI for live trace monitoring.
 """
 from __future__ import annotations
 
@@ -61,6 +62,22 @@ def main(argv: list[str] | None = None) -> int:
     p_dl.add_argument("--out-dir", default=None,
                       help="Where to put the data (default: data/<name>/).")
 
+    # ── dashboard ──────────────────────────────────────────────────────
+    p_dash = sub.add_parser("dashboard", help="Launch the trace monitoring web UI.")
+    p_dash.add_argument("--case", default=None,
+                        help="Open a specific case (e.g. titanic).")
+    p_dash.add_argument("--artifact-dir", default="artifacts",
+                        help="Root directory containing per-case artifact folders.")
+    p_dash.add_argument("--port", type=int, default=8765,
+                        help="HTTP port (default: 8765).")
+    p_dash.add_argument("--host", default="127.0.0.1",
+                        help="Bind address (default: 127.0.0.1).")
+    p_dash.add_argument("--no-open", action="store_true",
+                        help="Do not open a browser tab automatically.")
+    p_dash.add_argument("--static-dir", type=Path, default=None,
+                        help="Serve built frontend from this directory "
+                             "(default: dashboard/dist if it exists).")
+
     args = parser.parse_args(argv)
 
     if args.cmd is None:
@@ -74,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_run(args)
     if args.cmd == "data" and args.data_cmd == "download":
         return cmd_data_download(args)
+    if args.cmd == "dashboard":
+        return cmd_dashboard(args)
     parser.error("unreachable")
     return 2  # pragma: no cover
 
@@ -148,6 +167,45 @@ def cmd_data_download(args: argparse.Namespace) -> int:
     else:
         out = Path(args.out_dir) if args.out_dir else Path("data") / args.competition
         download_kaggle_competition(args.competition, out)
+    return 0
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    """Start the trace monitoring dashboard."""
+    try:
+        from maads.dashboard import run_dashboard
+    except ImportError:
+        print(
+            "ERROR: dashboard dependencies not installed. "
+            'Run: pip install -e ".[dashboard]"',
+            file=sys.stderr,
+        )
+        return 1
+
+    artifact_root = resolve_path(args.artifact_dir)
+    static_dir = args.static_dir
+    if static_dir is None:
+        default_static = resolve_path("dashboard") / "dist"
+        if default_static.is_dir():
+            static_dir = default_static
+    elif not static_dir.is_absolute():
+        static_dir = resolve_path(static_dir)
+
+    print(f"Artifact root: {artifact_root.resolve()}")
+    print(f"Dashboard:     http://{args.host}:{args.port}/")
+    if static_dir:
+        print(f"Frontend:      {static_dir}")
+    else:
+        print("Frontend:      not built — use `cd dashboard && npm run dev` for dev UI")
+
+    run_dashboard(
+        artifact_dir=artifact_root,
+        host=args.host,
+        port=args.port,
+        static_dir=static_dir,
+        open_browser=not args.no_open,
+        case_id=args.case,
+    )
     return 0
 
 

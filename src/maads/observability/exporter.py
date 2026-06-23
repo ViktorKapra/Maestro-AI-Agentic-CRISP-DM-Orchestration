@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 
 from maads.observability.collector import TraceCollector
+from maads.observability.communication_exporter import write_communication_artifacts
+from maads.observability.llm_communications import get_communication_registry
 from maads.observability.render.agent_interaction import render_agent_interaction
 from maads.observability.render.call_tree import render_call_tree
 from maads.observability.render.mermaid_flowchart import render_flowchart
@@ -43,6 +45,8 @@ def write_trace_artifacts(
         render_agent_interaction(run), encoding="utf-8"
     )
     (out_dir / "narrative.md").write_text(render_narrative(run), encoding="utf-8")
+
+    write_communication_artifacts(get_communication_registry(), out_dir)
 
     return trace_path
 

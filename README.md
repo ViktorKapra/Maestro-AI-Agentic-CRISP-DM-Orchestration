@@ -48,9 +48,38 @@ python -m maads run --case titanic
 ```
 
 While running, watch `artifacts/titanic/status.json` or the stderr progress bar.
-After completion, inspect `artifacts/titanic/trace/` for timelines and diagrams.
+After completion, inspect `artifacts/titanic/trace/` for timelines, diagrams, and
+`communications.md` (full agent–LLM prompt/response transcript).
 
 Use `--quiet` or `MAADS_PROGRESS=0` to disable the live progress bar.
+
+## Trace dashboard
+
+Monitor live and completed runs in a local web UI (progress, token spend,
+agent–LLM communications, architecture diagram).
+
+```bash
+pip install -e ".[dashboard]"
+
+# Terminal 1 — run the pipeline
+python -m maads run --case titanic
+
+# Terminal 2 — API server (serves built frontend if dashboard/dist exists)
+python -m maads dashboard --case titanic --no-open
+
+# Dev UI with hot reload (proxies /api to :8765)
+cd dashboard && npm install && npm run dev
+```
+
+Production-ish (single process serves API + static UI):
+
+```bash
+cd dashboard && npm install && npm run build
+python -m maads dashboard --case titanic
+```
+
+The dashboard binds to `127.0.0.1:8765` by default. Communications contain
+full prompts — local use only.
 
 ## Tests
 
@@ -71,8 +100,9 @@ pytest src/maads/
 | `maads run --config <path>` | Run from an explicit config file |
 | `maads data download --case <name>` | Download bundled case data |
 | `maads data download --competition <slug>` | Download any Kaggle competition |
+| `maads dashboard [--case <name>]` | Launch trace monitoring web UI |
 
 ## Environment variables
 
 See [`.env.example`](.env.example) for `MODEL`, `MAX_TOKENS_PER_RUN`, `MAADS_TRACE`,
-`MAADS_PROGRESS`, and Ollama settings.
+`MAADS_TRACE_LLM_IO`, `MAADS_PROGRESS`, and Ollama settings.

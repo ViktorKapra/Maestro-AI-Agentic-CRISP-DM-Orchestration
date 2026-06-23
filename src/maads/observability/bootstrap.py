@@ -9,6 +9,7 @@ from maads.observability import context as ctx
 from maads.observability.collector import get_collector, reset_collector
 from maads.observability.crewai_listener import register_crewai_listener
 from maads.observability.exporter import export_trace, write_trace_artifacts
+from maads.observability.llm_communications import reset_communication_registry
 from maads.observability.otel import setup_otel
 from maads.observability.patches import apply_patches
 
@@ -29,6 +30,7 @@ def auto_enable() -> None:
         return
 
     reset_collector()
+    reset_communication_registry()
     register_crewai_listener()
     setup_otel()
     apply_patches()

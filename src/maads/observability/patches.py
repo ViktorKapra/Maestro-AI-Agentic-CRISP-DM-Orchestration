@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import time
 from typing import Any
 
 from maads.observability import context as ctx
@@ -220,18 +221,34 @@ def _patch_crew() -> None:
         return
 
     orig = crew_mod.run_json_task
+    from maads.crew import build_task_description, pop_last_kickoff_output
+    from maads.observability.llm_communications import get_communication_registry
+    from maads.prompts import AGENT_PROMPTS
 
     @functools.wraps(orig)
     def traced_run_json_task(
         agent_name: str,
         instruction: str,
         state: Any,
-        schema_hint: str,
+        schema_hint: str = "",
     ):
         coll = get_collector()
+        registry = get_communication_registry()
         substep = state.substep
         ctx.current_maads_agent.set(agent_name)
-        coll.emit_start(
+        ctx.current_substep.set(substep)
+
+        description, state_view, agent = build_task_description(
+            agent_name, instruction, state, schema_hint
+        )
+        model_name = getattr(getattr(agent, "llm", None), "model", None)
+        role = AGENT_PROMPTS.get(agent_name, {}).get("role")
+
+        run = coll.run
+        run_id = run.run_id if run else ""
+        case_id = run.case_id if run else None
+
+        crew_evt_id = coll.emit_start(
             "crew.start",
             span_key=f"crew.{substep}.{agent_name}",
             name=f"Crew kickoff ({agent_name})",
@@ -242,31 +259,98 @@ def _patch_crew() -> None:
                 "instruction_preview": instruction[:200],
             },
         )
+
+        comm_id = registry.open_record(
+            run_id=run_id,
+            case_id=case_id,
+            substep=substep,
+            agent_name=agent_name,
+            role=role,
+            model=str(model_name) if model_name else None,
+            maads={
+                "task_description": description,
+                "instruction": instruction,
+                "schema_hint": schema_hint,
+                "state_view": state_view,
+                "state_view_bytes": len(state_view.encode("utf-8")),
+            },
+            trace_event_id=crew_evt_id,
+        )
+
+        crew_attrs = {
+            "agent_name": agent_name,
+            "substep": substep,
+            "communication_id": comm_id,
+            "prompt_preview": description[:200],
+        }
+        with coll._lock:
+            if coll.run is not None:
+                for e in reversed(coll.run.events):
+                    if e.id == crew_evt_id:
+                        e.attributes.update(crew_attrs)
+                        break
+
         from maads.progress import on_crew_end, on_crew_start
 
         on_crew_start(agent_name, substep)
         _flush_trace_snapshot()
+        t0 = time.monotonic()
         try:
             result = orig(agent_name, instruction, state, schema_hint)
+            raw_output, total_tokens = pop_last_kickoff_output()
+            duration_ms = round((time.monotonic() - t0) * 1000, 2)
+            sizes = registry.preview_sizes(comm_id)
+
+            registry.close_record(
+                comm_id,
+                raw_response=raw_output,
+                parsed_json=result,
+                parse_ok=result is not None,
+                tokens={"total": total_tokens},
+                duration_ms=duration_ms,
+            )
+
+            end_attrs = {
+                "agent_name": agent_name,
+                "substep": substep,
+                "parsed": result is not None,
+                "communication_id": comm_id,
+                **sizes,
+            }
             coll.emit_end(
                 "crew.end",
                 span_key=f"crew.{substep}.{agent_name}",
-                attributes={"agent_name": agent_name, "substep": substep, "parsed": result is not None},
+                attributes=end_attrs,
             )
             on_crew_end(agent_name, parsed=result is not None)
             _flush_trace_snapshot()
             return result
         except Exception as exc:
+            duration_ms = round((time.monotonic() - t0) * 1000, 2)
+            raw_output, total_tokens = pop_last_kickoff_output()
+            registry.close_record(
+                comm_id,
+                raw_response=raw_output,
+                parsed_json=None,
+                parse_ok=False,
+                tokens={"total": total_tokens},
+                error=str(exc),
+                duration_ms=duration_ms,
+            )
             coll.emit(
                 "exception",
                 name=type(exc).__name__,
                 source="maads.crew",
-                attributes={"agent_name": agent_name, "message": str(exc)},
+                attributes={"agent_name": agent_name, "message": str(exc), "communication_id": comm_id},
             )
             coll.emit_end(
                 "crew.end",
                 span_key=f"crew.{substep}.{agent_name}",
-                attributes={"agent_name": agent_name, "error": str(exc)},
+                attributes={
+                    "agent_name": agent_name,
+                    "error": str(exc),
+                    "communication_id": comm_id,
+                },
             )
             on_crew_end(agent_name, parsed=False)
             _flush_trace_snapshot()
@@ -274,6 +358,13 @@ def _patch_crew() -> None:
 
     traced_run_json_task._maads_traced = True  # type: ignore[attr-defined]
     crew_mod.run_json_task = traced_run_json_task
+
+    # agents.py does `from maads.crew import run_json_task` at import time, so
+    # replacing crew_mod.run_json_task alone does not affect agent LLM calls.
+    import maads.agents as agents_mod
+
+    if agents_mod.run_json_task is orig:
+        agents_mod.run_json_task = traced_run_json_task
 
 
 def _patch_tools() -> None:
