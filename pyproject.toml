@@ -1,0 +1,39 @@
+[project]
+name = "maads"
+version = "0.1.0"
+description = "Multi-Agent System for Automated Data Science — CRISP-DM over CrewAI"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    # scaffold core
+    "python-dotenv>=1.0",
+    "openai>=1.0",
+    "tiktoken>=0.5",
+    "pydantic>=2.0",
+    "PyYAML>=6.0",
+    # framework (>=1.10.1 required by openinference-instrumentation-crewai)
+    "crewai>=1.10.1,<2.0",
+    "crewai-tools>=1.10.1,<2.0",
+    # ML stack (Phase 1 fixed-baseline modeling)
+    "pandas>=2.1",
+    "scikit-learn>=1.4",
+    "pyarrow>=15.0",
+    # data
+    "kaggle>=1.6",
+    # observability
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "openinference-instrumentation-crewai>=0.1.10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# src layout: the importable package is src/maads. Restrict discovery to maads*
+# so the separate src/crew_starter Ollama experiment is not packaged.
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["maads*"]

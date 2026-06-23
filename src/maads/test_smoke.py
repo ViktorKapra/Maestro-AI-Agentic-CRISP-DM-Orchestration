@@ -20,7 +20,7 @@ from maads.state import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_all_three_configs_load():
