@@ -220,3 +220,4 @@ __marimo__/
 # maads — run outputs and downloaded/synthetic data (never commit)
 artifacts/
 data/
+src/artifacts/*

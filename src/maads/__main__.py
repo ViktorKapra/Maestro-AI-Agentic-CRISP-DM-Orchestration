@@ -20,6 +20,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from maads.observability import auto_enable, begin_run, end_run
 from maads.config import load_case_config
 from maads.data_utils import download_case_data, download_kaggle_competition
 from maads.orchestrator import Orchestrator
@@ -28,6 +29,7 @@ from maads.state import CrispDMState
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
+    auto_enable()
 
     parser = argparse.ArgumentParser(prog="maads")
     sub = parser.add_subparsers(dest="cmd")
@@ -99,8 +101,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     artifact_dir = Path(args.artifact_dir) / config.case_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
+    begin_run(config.case_id, artifact_dir)
     # Run the multi-agent CRISP-DM pipeline.
     state = Orchestrator(state, artifact_dir).run()
+    end_run(artifact_dir)
 
     state_path = artifact_dir / "final_state.json"
     state_path.write_text(state.model_dump_json(indent=2))

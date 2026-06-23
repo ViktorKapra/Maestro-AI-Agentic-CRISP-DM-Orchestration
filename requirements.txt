@@ -5,10 +5,9 @@ tiktoken>=0.5
 pydantic>=2.0
 PyYAML>=6.0
 
-# CrewAI starter (optional multi-agent framework demo)
-# CrewAI brings its own LLM plumbing (built on LiteLLM); pin deliberately.
-crewai>=0.80,<1.0
-crewai-tools>=0.12
+# CrewAI (>=1.10.1 required for openinference auto-instrumentation)
+crewai>=1.10.1,<2.0
+crewai-tools>=1.10.1,<2.0
 
 # ML stack — Phase 1 fixed-baseline modeling (canonical list lives in pyproject.toml)
 pandas>=2.1
