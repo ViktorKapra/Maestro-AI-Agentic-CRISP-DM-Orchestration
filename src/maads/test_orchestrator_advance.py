@@ -1,17 +1,20 @@
-"""Tests for orchestrator advance semantics and related fixes."""
+"""Tests for phase advance semantics and related fixes."""
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from maads.agents import Plan
 from maads.config import load_case_config
 from maads.crew import _check_token_budget
-from maads.orchestrator import Orchestrator
+from maads.flow import phase_runner as pr
+from maads.flow.phase_runner import PM_DECISION_SUBSTEPS, advance_substep
 from maads.paths import repo_root, resolve_path
 from maads.state import CrispDMState, Phase
+from maads.testing.fake_llm import fake_llm_response
+from maads.testing.flow_harness import make_flow, make_run_context
 
 
 @pytest.fixture
@@ -21,41 +24,44 @@ def titanic_state() -> CrispDMState:
 
 
 def test_advance_recovers_desynced_phase_substep(titanic_state: CrispDMState, tmp_path: Path):
-    """Phase/substep mismatch must not crash _advance_substep."""
+    """Phase/substep mismatch must not crash advance_substep."""
     titanic_state.phase = Phase.DATA_PREPARATION
     titanic_state.substep = "4.1"
     artifact_dir = tmp_path / "artifacts" / "titanic"
     artifact_dir.mkdir(parents=True)
-    orch = Orchestrator(titanic_state, artifact_dir)
+    ctx = make_run_context(titanic_state, artifact_dir)
 
-    orch._advance_substep()
+    advance_substep(ctx)
 
     assert titanic_state.phase == Phase.MODELING
     assert titanic_state.substep == "4.2"
 
 
+@patch("maads.agents.run_json_task")
 def test_advance_dispatches_current_substep_not_pm_target(
-    titanic_state: CrispDMState, tmp_path: Path,
+    mock_llm, titanic_state: CrispDMState, tmp_path: Path,
 ):
     """PM target_substep on advance must not skip the current substep."""
+    mock_llm.side_effect = fake_llm_response
     artifact_dir = tmp_path / "artifacts" / "titanic"
     artifact_dir.mkdir(parents=True)
-    orch = Orchestrator(titanic_state, artifact_dir)
     dispatched: list[str] = []
+    orig = pr.run_substep
 
-    def track_dispatch(substep: str) -> None:
+    def track(ctx, substep: str) -> None:
         dispatched.append(substep)
+        orig(ctx, substep)
 
-    plans = iter([
-        Plan(action="advance", target_substep="1.2", reason="PM tried to skip"),
-        Plan(action="halt", reason="stop after one iteration"),
-    ])
-    orch.pm.plan = lambda _state: next(plans)  # type: ignore[method-assign]
-    orch._dispatch = track_dispatch  # type: ignore[method-assign]
+    with patch.object(pr, "run_substep", side_effect=track):
+        flow = make_flow(titanic_state, artifact_dir)
+        plans = iter([
+            Plan(action="advance", target_substep="1.2", reason="PM tried to skip"),
+            Plan(action="halt", reason="stop at phase 2 entry"),
+        ])
+        flow._pm.plan = lambda _state: next(plans)  # type: ignore[method-assign]
+        flow.run()
 
-    orch.run()
-
-    assert dispatched == ["1.1"]
+    assert dispatched == ["1.1", "1.2", "1.3", "1.4"]
     assert any("ignored PM target_substep" in e.message for e in titanic_state.log)
 
 
@@ -105,9 +111,9 @@ def test_pm_plan_halts_on_llm_failure(mock_llm, titanic_state: CrispDMState, tmp
 def test_phase1_domain_llm_substeps_run_in_order(
     mock_llm, titanic_state: CrispDMState, tmp_path: Path,
 ):
-    """Integration: mocked LLM fills domain substeps; orchestrator visits 1.1 before 1.2."""
+    """Integration: mocked LLM fills domain substeps; flow visits 1.1 before 1.2."""
 
-    def _fake_llm(agent_name, instruction, state, schema_hint=""):
+    def _fake_llm(agent_name, instruction, state, schema_hint="", **kwargs):
         if state.substep == "1.1":
             return {
                 "business_objectives": "obj",
@@ -143,27 +149,87 @@ def test_phase1_domain_llm_substeps_run_in_order(
     artifact_dir = tmp_path / "artifacts" / "titanic"
     artifact_dir.mkdir(parents=True)
     dispatched: list[str] = []
-    orch = Orchestrator(titanic_state, artifact_dir)
-    orig = orch._dispatch
+    orig = pr.run_substep
 
-    def track(substep: str) -> None:
+    def track(ctx, substep: str) -> None:
         dispatched.append(substep)
-        orig(substep)
+        orig(ctx, substep)
 
-    orch._dispatch = track  # type: ignore[method-assign]
-
-    # Run through phase 1 only — halt once we reach phase 2.
-    plans = []
-    for _ in range(30):
-        plans.append(Plan(action="advance", reason="ok"))
-    plans.append(Plan(action="halt", reason="stop"))
-    plan_iter = iter(plans)
-    orch.pm.plan = lambda _s: next(plan_iter)  # type: ignore[method-assign]
-
-    orch.run()
+    with patch.object(pr, "run_substep", side_effect=track):
+        flow = make_flow(titanic_state, artifact_dir)
+        plans = []
+        for _ in range(30):
+            plans.append(Plan(action="advance", reason="ok"))
+        plans.append(Plan(action="halt", reason="stop"))
+        plan_iter = iter(plans)
+        flow._pm.plan = lambda _s: next(plan_iter)  # type: ignore[method-assign]
+        flow.run()
 
     assert dispatched.index("1.1") < dispatched.index("1.2")
     assert "1.1" in dispatched
     assert "1.3" in dispatched
     assert titanic_state.bu.business_objectives == "obj"
     assert titanic_state.bu.data_mining_goals == "goal"
+
+
+def test_pm_decision_substeps_cover_phase_boundaries_and_loops():
+    """PM LLM should fire at phase entry and loop checkpoints, not every substep."""
+    assert "1.1" in PM_DECISION_SUBSTEPS
+    assert "3.1" in PM_DECISION_SUBSTEPS
+    assert "5.1" in PM_DECISION_SUBSTEPS
+    assert "5.2" in PM_DECISION_SUBSTEPS
+    assert "1.2" not in PM_DECISION_SUBSTEPS
+    assert "2.2" not in PM_DECISION_SUBSTEPS
+    assert "4.3" not in PM_DECISION_SUBSTEPS
+
+
+def test_mechanical_advance_skips_pm_llm_between_decision_points(
+    titanic_state: CrispDMState, tmp_path: Path,
+):
+    """Mid-phase substeps must not call the PM LLM."""
+    artifact_dir = tmp_path / "artifacts" / "titanic"
+    artifact_dir.mkdir(parents=True)
+    pm_calls: list[str] = []
+    dispatched: list[str] = []
+    orig = pr.run_substep
+
+    def track_plan(state: CrispDMState) -> Plan:
+        pm_calls.append(state.substep)
+        if state.substep == "2.1":
+            return Plan(action="halt", reason="stop")
+        return Plan(action="advance", reason="ok")
+
+    def track(ctx, substep: str) -> None:
+        dispatched.append(substep)
+
+    with patch.object(pr, "run_substep", side_effect=track):
+        flow = make_flow(titanic_state, artifact_dir)
+        flow._pm.plan = track_plan  # type: ignore[method-assign]
+        flow.run()
+
+    assert pm_calls == ["1.1", "2.1"]
+    assert dispatched.index("1.1") < dispatched.index("1.2") < dispatched.index("1.4")
+    assert any("mechanical advance" in e.message for e in titanic_state.log)
+
+
+def test_pm_llm_called_at_each_decision_substep(
+    titanic_state: CrispDMState, tmp_path: Path,
+):
+    """A full 24-substep walk consults the PM only at decision checkpoints."""
+    artifact_dir = tmp_path / "artifacts" / "titanic"
+    artifact_dir.mkdir(parents=True)
+    pm_calls: list[str] = []
+
+    def track_plan(state: CrispDMState) -> Plan:
+        pm_calls.append(state.substep)
+        return Plan(action="advance", reason="ok")
+
+    with patch.object(pr, "run_substep", lambda *_a, **_k: None):
+        flow = make_flow(titanic_state, artifact_dir)
+        flow._pm.plan = track_plan  # type: ignore[method-assign]
+        flow.run()
+
+    assert set(pm_calls) == set(PM_DECISION_SUBSTEPS)
+    # 3.1 is consulted at the phase-2 exit checkpoint and again at phase-3 entry.
+    assert pm_calls.count("3.1") == 2
+    assert len(pm_calls) == len(PM_DECISION_SUBSTEPS) + 1

@@ -5,6 +5,7 @@ Subcommands:
     data download --competition <slug>  Download any Kaggle competition.
     run --case <name>                   Run the CrewAI-backed CRISP-DM pipeline.
     run --config <path>                 Run from an explicit case config YAML.
+    flow plot                           Visualize the CRISP-DM Flow graph.
     dashboard                           Web UI for live trace monitoring.
 """
 from __future__ import annotations
@@ -12,14 +13,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+from maads.artifact_runs import case_root, prepare_run_dir
+from maads.knowledge_setup import repo_root
+from maads.rag import ensure_embedding_model_available
+
 from maads.config import load_case_config, kickoff_inputs
 from maads.data_utils import download_case_data, download_kaggle_competition
-from maads.observability import auto_enable, begin_run, end_run
-from maads.orchestrator import Orchestrator
+from maads.observability import auto_enable, begin_run, configure_crewai_runtime, end_run
+from maads.flow.crisp_dm_flow import CrispDMFlow
 from maads.paths import resolve_path
 from maads.progress import start_run as start_progress, stop_run as stop_progress
 from maads.run_status import bind_run, flush_status
@@ -29,6 +35,7 @@ from maads.state import CrispDMState
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
+    configure_crewai_runtime()
     auto_enable()
 
     parser = argparse.ArgumentParser(prog="maads")
@@ -44,8 +51,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="Directory holding bundled <case>.yaml files. "
                             "Used only when --case is given.")
     p_run.add_argument("--artifact-dir", default="artifacts",
-                       help="Where to write per-run artefacts. A subdirectory "
-                            "named after case_id is created.")
+                       help="Root for per-case artefacts. Each run writes to "
+                            "artifacts/<case_id>/runs/<run_id>/; prior runs "
+                            "are kept under artifacts/<case_id>/archive/.")
     p_run.add_argument("--quiet", "-q", action="store_true",
                        help="Disable live progress output (also MAADS_PROGRESS=0).")
 
@@ -61,6 +69,16 @@ def main(argv: list[str] | None = None) -> int:
                       help="Any Kaggle competition slug.")
     p_dl.add_argument("--out-dir", default=None,
                       help="Where to put the data (default: data/<name>/).")
+
+    # ── flow ───────────────────────────────────────────────────────────
+    p_flow = sub.add_parser("flow", help="CrewAI Flow utilities.")
+    sub_flow = p_flow.add_subparsers(dest="flow_cmd")
+    p_flow_plot = sub_flow.add_parser("plot", help="Render the CRISP-DM Flow graph.")
+    p_flow_plot.add_argument(
+        "--output",
+        default="crisp_dm_flow",
+        help="Output path prefix for the HTML graph (default: crisp_dm_flow).",
+    )
 
     # ── dashboard ──────────────────────────────────────────────────────
     p_dash = sub.add_parser("dashboard", help="Launch the trace monitoring web UI.")
@@ -89,6 +107,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "run":
         return cmd_run(args)
+    if args.cmd == "flow" and args.flow_cmd == "plot":
+        return cmd_flow_plot(args)
+    if args.cmd == "flow" and args.flow_cmd is None:
+        p_flow.print_help()
+        return 0
     if args.cmd == "data" and args.data_cmd == "download":
         return cmd_data_download(args)
     if args.cmd == "dashboard":
@@ -98,7 +121,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """Resolve the case config and run the orchestrator."""
+    """Resolve the case config and run the CRISP-DM Flow pipeline."""
+    import os
+
+    os.chdir(repo_root())
+    embed_warn = ensure_embedding_model_available()
+    if embed_warn:
+        print(f"WARNING: {embed_warn}", file=sys.stderr)
+
     if args.config:
         config_path = Path(args.config)
         if not config_path.is_absolute():
@@ -113,8 +143,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     config = load_case_config(config_path)
     state = CrispDMState.from_config(config)
 
-    artifact_dir = resolve_path(args.artifact_dir) / config.case_id
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    case_dir = case_root(resolve_path(args.artifact_dir), config.case_id)
+    run_id = str(uuid.uuid4())
+    artifact_dir = prepare_run_dir(case_dir, run_id)
+
+    os.environ.setdefault(
+        "CREWAI_STORAGE_DIR",
+        str((artifact_dir / "crewai_storage").resolve()),
+    )
 
     inputs = kickoff_inputs(config)
     (artifact_dir / "kickoff_inputs.json").write_text(
@@ -122,18 +158,22 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     resolved = artifact_dir.resolve()
-    print(f"Artifacts: {resolved}")
+    print(f"Case root:   {case_dir.resolve()}")
+    print(f"Run ID:      {run_id}")
+    print(f"Artifacts:   {resolved}")
+    print(f"Archive:     {(case_dir / 'archive').resolve()}")
     print(f"Live status: {resolved / 'status.json'}  (refresh while running)")
     print(f"Trace:       {resolved / 'trace'}/")
+    print(f"Exec scripts: {resolved / 'sandbox' / 'exec'}/")
 
     install_sigint_handler()
     bind_run(artifact_dir, state)
     start_progress(config.case_id, quiet=args.quiet)
-    begin_run(config.case_id, artifact_dir)
+    begin_run(config.case_id, artifact_dir, run_id=run_id)
     halt_reason: str | None = None
     interrupted = False
     try:
-        state = Orchestrator(state, artifact_dir).run()
+        state = CrispDMFlow(state, artifact_dir).run()
         if shutdown_requested() and not state.halted:
             halt_reason = apply_interrupt_to_state(state)
             interrupted = True
@@ -158,6 +198,20 @@ def cmd_run(args: argparse.Namespace) -> int:
     if interrupted:
         return 130
     return 0 if state.dep.submission_path else 1
+
+
+def cmd_flow_plot(args: argparse.Namespace) -> int:
+    """Write an HTML visualization of CrispDMFlow."""
+    from maads.config import load_case_config
+    from maads.paths import resolve_path
+
+    config_path = resolve_path("configs/titanic.yaml")
+    config = load_case_config(config_path)
+    state = CrispDMState.from_config(config)
+    flow = CrispDMFlow(state, Path("artifacts/plot"))
+    flow.plot(args.output)
+    print(f"Flow visualization saved to {args.output}.html")
+    return 0
 
 
 def cmd_data_download(args: argparse.Namespace) -> int:

@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from maads.dashboard.aggregators import build_graph, filter_timeline_events, trace_summary
+from maads.dashboard.aggregators import (
+    build_graph,
+    build_process_view,
+    filter_timeline_events,
+    trace_summary,
+)
 from maads.observability.schema import TraceEvent, TraceRun
 
 
@@ -85,6 +90,43 @@ def test_build_graph_active_llm_edge():
     assert len(animated) >= 1
 
 
+def test_build_graph_developer_debug_llm_edge():
+    """Developer LLM during DEBUG must not be attributed to the substep owner."""
+    run = TraceRun(
+        run_id="r1",
+        events=[
+            _evt("evt_0001", "substep.dispatch", attrs={"owner": "data_engineer"}, mono=10),
+            _evt(
+                "evt_0002",
+                "agent.activate",
+                name="Senior Developer & On-Call Debugger",
+                attrs={
+                    "role": "Senior Developer & On-Call Debugger",
+                    "maads_agent": "data_engineer",
+                    "agent_name": "data_engineer",
+                },
+                mono=20,
+            ),
+            _evt(
+                "evt_0003",
+                "llm.start",
+                attrs={
+                    "role": "Senior Developer & On-Call Debugger",
+                    "maads_agent": "data_engineer",
+                    "communication_id": "comm_debug",
+                },
+                mono=30,
+            ),
+        ],
+    )
+    graph = build_graph(run)
+    node_ids = {n["id"] for n in graph["nodes"]}
+    assert "developer" in node_ids
+    llm_edges = [e for e in graph["edges"] if e["target"] == "llm"]
+    assert any(e["source"] == "developer" for e in llm_edges)
+    assert not any(e["source"] == "data_engineer" for e in llm_edges)
+
+
 @pytest.mark.skipif(
     not Path("artifacts/titanic/trace/trace.json").is_file(),
     reason="titanic trace artifact not present",
@@ -95,3 +137,72 @@ def test_build_graph_from_titanic_artifact():
     graph = build_graph(run)
     assert graph["nodes"]
     assert graph["edges"]
+
+
+def test_build_process_view_substep_status():
+    run = TraceRun(
+        run_id="r1",
+        case_id="titanic",
+        events=[
+            _evt("evt_0001", "substep.dispatch", attrs={"substep": "1.1", "owner": "domain"}, mono=10),
+            _evt("evt_0002", "substep.end", attrs={"substep": "1.1"}, mono=100),
+            _evt("evt_0003", "substep.dispatch", attrs={"substep": "1.2", "owner": "domain"}, mono=200),
+        ],
+    )
+    status = {
+        "substep": "1.2",
+        "substep_name": "Assess Situation",
+        "phase": 1,
+        "activity": "working",
+        "token_spend": {"domain": 100},
+    }
+    snapshot = {
+        "outputs_status": {"phase_1_ready": False},
+        "conclusions": {},
+        "config": {"problem_statement": "test"},
+        "recent_log": [{"agent": "domain", "message": "ran 1.1 -> notes", "level": "info"}],
+        "loop_history": [],
+        "validator_findings": [],
+    }
+    view = build_process_view(status, run, snapshot)
+    by_id = {s["id"]: s for s in view["substeps"]}
+    assert by_id["1.1"]["status"] == "done"
+    assert by_id["1.2"]["status"] == "active"
+    assert by_id["1.3"]["status"] == "pending"
+    assert view["team"][1]["id"] == "domain"  # domain is second in _AGENT_IDS
+    domain = next(t for t in view["team"] if t["id"] == "domain")
+    assert domain["status"] == "active"
+    assert domain["current_substep"] == "1.2"
+    assert len(view["phases"]) == 6
+    assert view["phases"][0]["status"] == "active"
+
+
+def test_build_process_view_loops():
+    run = TraceRun(
+        run_id="r1",
+        events=[
+            _evt(
+                "evt_0001",
+                "loop",
+                attrs={"label": "B", "from_phase": 4, "to_phase": 3, "reason": "low CV"},
+            ),
+        ],
+    )
+    status = {"substep": "3.1", "phase": 3, "token_spend": {}}
+    snapshot = {
+        "loop_history": [{
+            "label": "B",
+            "from_phase": 4,
+            "to_phase": 3,
+            "reason": "validator findings",
+            "t": "2025-01-01T00:00:00+00:00",
+        }],
+        "outputs_status": {},
+        "conclusions": {},
+        "config": {},
+        "recent_log": [],
+        "validator_findings": ["missing train.parquet"],
+    }
+    view = build_process_view(status, run, snapshot)
+    assert len(view["loops"]) == 2
+    assert view["validator_findings"] == ["missing train.parquet"]

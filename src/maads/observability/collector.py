@@ -37,8 +37,8 @@ class TraceCollector:
     def run(self) -> TraceRun | None:
         return self._run
 
-    def start_run(self, case_id: str | None = None) -> str:
-        run_id = str(uuid.uuid4())
+    def start_run(self, case_id: str | None = None, *, run_id: str | None = None) -> str:
+        run_id = run_id or str(uuid.uuid4())
         with self._lock:
             self._t0_mono = time.monotonic()
             self._run = TraceRun(run_id=run_id, case_id=case_id)

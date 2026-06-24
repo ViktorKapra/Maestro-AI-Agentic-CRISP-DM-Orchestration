@@ -79,7 +79,7 @@ def _feature_names(claimed) -> list[str]:
         if isinstance(item, str):
             names.append(item)
         elif isinstance(item, dict):
-            name = item.get("name") or item.get("feature")
+            name = item.get("name") or item.get("feature") or item.get("field")
             if isinstance(name, str):
                 names.append(name)
     return names

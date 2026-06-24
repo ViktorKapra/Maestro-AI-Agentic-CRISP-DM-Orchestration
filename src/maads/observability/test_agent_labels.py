@@ -10,6 +10,16 @@ def test_resolve_maads_agent_from_maads_agent_key():
     assert resolve_maads_agent_id({"maads_agent": "domain"}) == "domain"
 
 
+def test_resolve_maads_agent_prefers_crew_role_over_stale_context():
+    """Developer DEBUG runs mid-substep with orchestrator context still on data_engineer."""
+    attrs = {
+        "role": "Senior Developer & On-Call Debugger",
+        "maads_agent": "data_engineer",
+        "agent_name": "data_engineer",
+    }
+    assert resolve_maads_agent_id(attrs) == "developer"
+
+
 def test_format_agent_label_includes_role_and_id():
     label = format_agent_label({"maads_agent": "pm"})
     assert "Project Manager" in label

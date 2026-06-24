@@ -1,0 +1,29 @@
+decision_task:
+  description: >
+    Current CRISP-DM state (JSON):
+
+    {state_view}
+
+    {instruction}
+  expected_output: A single JSON object, no prose, no Markdown fences.
+  agent: pm
+
+review_task:
+  description: >
+    Current CRISP-DM state (JSON):
+
+    {state_view}
+
+    {instruction}
+  expected_output: A single JSON object, no prose, no Markdown fences.
+  agent: pm
+
+next_steps_task:
+  description: >
+    Current CRISP-DM state (JSON):
+
+    {state_view}
+
+    {instruction}
+  expected_output: A single JSON object, no prose, no Markdown fences.
+  agent: pm

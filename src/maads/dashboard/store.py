@@ -5,26 +5,30 @@ import json
 from pathlib import Path
 from typing import Any
 
+from maads.artifact_runs import resolve_active_run_dir
 from maads.observability.llm_communications import LLMCommunicationRecord
 from maads.observability.schema import TraceRun
 
 
 def list_cases(artifact_root: Path) -> list[dict[str, Any]]:
-    """Scan ``artifact_root/*/status.json`` for known runs."""
+    """Scan ``artifact_root/<case>/`` for the active run's ``status.json``."""
     if not artifact_root.is_dir():
         return []
     cases: list[dict[str, Any]] = []
     for child in sorted(artifact_root.iterdir()):
         if not child.is_dir():
             continue
-        status_path = child / "status.json"
+        run_dir = resolve_active_run_dir(child)
+        if run_dir is None:
+            continue
+        status_path = run_dir / "status.json"
         if not status_path.is_file():
             continue
         try:
             payload = json.loads(status_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        cases.append(_case_summary(child.name, child, payload))
+        cases.append(_case_summary(child.name, run_dir, payload))
     return cases
 
 
@@ -57,10 +61,11 @@ def _case_summary(case_id: str, artifact_dir: Path, status: dict[str, Any]) -> d
 
 
 def case_dir(artifact_root: Path, case_id: str) -> Path:
-    path = artifact_root / case_id
-    if not path.is_dir():
+    case_path = artifact_root / case_id
+    run_dir = resolve_active_run_dir(case_path)
+    if run_dir is None:
         raise FileNotFoundError(f"Case not found: {case_id}")
-    return path
+    return run_dir
 
 
 def read_status(artifact_dir: Path) -> dict[str, Any]:
@@ -75,6 +80,22 @@ def read_trace(artifact_dir: Path) -> TraceRun:
     if not path.is_file():
         raise FileNotFoundError("trace.json not found")
     return TraceRun.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def read_trace_optional(artifact_dir: Path, *, case_id: str = "") -> TraceRun:
+    """Return trace data or an empty run shell when tracing has not flushed yet."""
+    path = artifact_dir / "trace" / "trace.json"
+    if path.is_file():
+        return TraceRun.model_validate_json(path.read_text(encoding="utf-8"))
+    status_path = artifact_dir / "status.json"
+    case = case_id
+    if status_path.is_file():
+        try:
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            case = status.get("case_id") or case
+        except (json.JSONDecodeError, OSError):
+            pass
+    return TraceRun(run_id=artifact_dir.name, case_id=case or None, events=[])
 
 
 def read_communications(artifact_dir: Path) -> list[LLMCommunicationRecord]:
@@ -95,3 +116,50 @@ def read_communications_summary(artifact_dir: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_process_snapshot(artifact_dir: Path) -> dict[str, Any]:
+    """Read live ``process.json`` or fall back to ``final_state.json``."""
+    process_path = artifact_dir / "process.json"
+    if process_path.is_file():
+        return json.loads(process_path.read_text(encoding="utf-8"))
+    final_path = artifact_dir / "final_state.json"
+    if final_path.is_file():
+        return _process_snapshot_from_final_state(
+            json.loads(final_path.read_text(encoding="utf-8"))
+        )
+    return {}
+
+
+def _process_snapshot_from_final_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Map a ``final_state.json`` payload to the ``process.json`` shape."""
+    from maads.state import CrispDMState
+
+    parsed = CrispDMState.model_validate(state)
+    from maads.run_status import _build_process_snapshot
+
+    return _build_process_snapshot(parsed)
+
+
+def read_state(artifact_dir: Path) -> dict[str, Any]:
+    """Read live ``state.json`` or fall back to ``final_state.json``."""
+    live_path = artifact_dir / "state.json"
+    if live_path.is_file():
+        raw = json.loads(live_path.read_text(encoding="utf-8"))
+        if "state" in raw:
+            return {
+                "updated_at": raw.get("updated_at"),
+                "source": "live",
+                "state": raw["state"],
+            }
+        return {"updated_at": None, "source": "live", "state": raw}
+
+    final_path = artifact_dir / "final_state.json"
+    if final_path.is_file():
+        return {
+            "updated_at": None,
+            "source": "final",
+            "state": json.loads(final_path.read_text(encoding="utf-8")),
+        }
+
+    raise FileNotFoundError("state.json not found")

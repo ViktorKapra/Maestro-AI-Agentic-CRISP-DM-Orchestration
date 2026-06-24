@@ -225,3 +225,6 @@ src/artifacts/*
 # Dashboard frontend build artifacts
 dashboard/node_modules/
 dashboard/dist/
+
+# Editor settings (colleagues use other IDEs)
+.vscode/

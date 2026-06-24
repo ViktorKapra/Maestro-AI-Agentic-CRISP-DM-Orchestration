@@ -29,6 +29,20 @@ def test_bind_run_writes_status_files(tmp_path: Path):
     assert "artifact_dir" in payload
     assert "trace_dir" in payload
 
+    process = json.loads((artifact_dir / "process.json").read_text())
+    assert "outputs_status" in process
+    assert "conclusions" in process
+    assert "phases" in process["conclusions"]
+    assert "recent_log" in process
+    assert "loop_history" in process
+    assert process["config"]["problem_statement"]
+
+    state_wrap = json.loads((artifact_dir / "state.json").read_text())
+    assert "updated_at" in state_wrap
+    state_data = state_wrap["state"]
+    for key in ("bu", "du", "dp", "md", "ev", "dep", "log", "phase", "substep"):
+        assert key in state_data
+
 
 def test_set_activity_and_substep_done_update_status(tmp_path: Path):
     config = load_case_config(resolve_path("configs/titanic.yaml"))

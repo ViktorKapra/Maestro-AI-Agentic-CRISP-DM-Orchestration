@@ -100,6 +100,7 @@ def fake_llm_response(
     instruction: str,
     state: CrispDMState,
     schema_hint: str = "",
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Return minimal JSON payloads so every agent ``act()`` path succeeds."""
     if agent_name == "pm":

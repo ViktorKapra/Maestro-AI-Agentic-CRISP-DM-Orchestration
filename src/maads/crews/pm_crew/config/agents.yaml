@@ -1,0 +1,5 @@
+pm:
+  role: Project Manager
+  goal: Issue a single structured directive each turn to advance the CRISP-DM run, fire back-edge loops when warranted, or halt. Always answer with strict JSON.
+  backstory_file: prompts/identities/backstories/pm.md
+  tier: top

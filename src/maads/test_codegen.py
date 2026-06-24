@@ -105,3 +105,26 @@ def test_contract_violation_triggers_fallback(monkeypatch, pyexec, state):
     )
     assert res.degraded
     assert res.payload == {"good": True}
+
+
+def test_header_injects_stdlib_imports(monkeypatch, pyexec, state, tmp_path: Path):
+    """Authored code may omit import json; preamble supplies it."""
+    from maads.codegen import _header
+
+    header = _header({})
+    assert "import json" in header
+    assert "import pandas as pd" in header
+
+    _patch_llm(
+        monkeypatch,
+        ['```python\nprint(json.dumps({"ok": True}))\n```'],
+    )
+    res = run_authored_code(
+        pyexec=pyexec, agent_name="data_engineer", state=state,
+        instruction="test",
+        header_vars={},
+        contract=lambda p: [] if p.get("ok") else ["fail"],
+        max_retries=1,
+        artifact_dir=tmp_path,
+    )
+    assert res.ok

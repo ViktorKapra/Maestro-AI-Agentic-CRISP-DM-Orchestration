@@ -37,6 +37,11 @@ def agent_role_from_crew(event: Any) -> str | None:
 
 def resolve_maads_agent_id(attrs: dict[str, Any], *, event_name: str = "") -> str | None:
     """Best-effort MAADS agent id (``pm``, ``domain``, …) from trace attributes."""
+    role = attrs.get("role")
+    if role:
+        mapped = maads_id_for_role(str(role))
+        if mapped:
+            return mapped
     for key in ("agent_name", "maads_agent", "agent"):
         raw = attrs.get(key)
         if not raw:
@@ -49,9 +54,6 @@ def resolve_maads_agent_id(attrs: dict[str, Any], *, event_name: str = "") -> st
             return mapped
         if text not in _GENERIC_EVENT_NAMES:
             return text
-    role = attrs.get("role")
-    if role:
-        return maads_id_for_role(str(role))
     if event_name and event_name not in _GENERIC_EVENT_NAMES:
         if event_name in AGENT_PROMPTS:
             return event_name

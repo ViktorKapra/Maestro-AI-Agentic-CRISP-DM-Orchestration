@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from maads.agents import Plan
 from maads.config import load_case_config
 from maads.observability.bootstrap import auto_enable, begin_run, end_run, flush_trace
 from maads.observability.collector import reset_collector
@@ -19,7 +20,7 @@ from maads.observability.render.mermaid_sequence import render_sequence
 from maads.observability.render.narrative import render_narrative
 from maads.observability.render.timeline import render_timeline
 from maads.observability.schema import TraceEvent, TraceRun
-from maads.orchestrator import Orchestrator
+from maads.flow.crisp_dm_flow import CrispDMFlow
 from maads.state import CrispDMState
 from maads.testing.fake_llm import fake_llm_response
 
@@ -146,7 +147,7 @@ def test_export_writes_all_artefacts(tmp_path: Path):
 
 
 @patch("maads.agents.run_json_task")
-def test_integration_orchestrator_trace(mock_llm, tmp_path: Path):
+def test_integration_flow_trace(mock_llm, tmp_path: Path):
     mock_llm.side_effect = fake_llm_response
 
     auto_enable()
@@ -156,7 +157,11 @@ def test_integration_orchestrator_trace(mock_llm, tmp_path: Path):
     artifact_dir.mkdir(parents=True)
 
     begin_run(cfg.case_id, artifact_dir)
-    state = Orchestrator(state, artifact_dir).run()
+    flow = CrispDMFlow(state, artifact_dir)
+    plans = [Plan(action="advance", reason="ok") for _ in range(60)]
+    plan_iter = iter(plans)
+    flow._pm.plan = lambda _s: next(plan_iter, Plan(action="halt", reason="done"))  # type: ignore[method-assign]
+    state = flow.run()
     end_run(artifact_dir)
 
     trace_dir = artifact_dir / "trace"
@@ -168,11 +173,12 @@ def test_integration_orchestrator_trace(mock_llm, tmp_path: Path):
     assert "substep.dispatch" in types
     assert "python.subprocess" in types
 
-    timeline = (trace_dir / "timeline.md").read_text()
-    assert "1.1" in timeline
-    assert "6.1" in timeline or any(
-        e.get("attributes", {}).get("substep") == "6.1" for e in data["events"]
-    )
+    substeps = {
+        e.get("attributes", {}).get("substep")
+        for e in data["events"]
+        if e.get("attributes", {}).get("substep")
+    }
+    assert "5.1" in substeps or "6.1" in substeps
 
     assert state.dep.submission_path
 

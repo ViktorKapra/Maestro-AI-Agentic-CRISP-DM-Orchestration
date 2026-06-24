@@ -9,10 +9,12 @@ import pytest
 from maads.agents import Plan, ProjectManagerAgent
 from maads.config import load_case_config
 from maads.crew import CrewKickoffError
-from maads.orchestrator import Orchestrator
+from maads.flow import phase_runner as pr
 from maads.paths import resolve_path
 from maads.state import SUBSTEPS, CrispDMState, Phase
 from maads.testing.fake_llm import fake_llm_response
+from maads.testing.fake_llm import fake_llm_response
+from maads.testing.flow_harness import make_flow, make_run_context
 
 
 @pytest.fixture
@@ -28,9 +30,6 @@ def fast_run(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MAADS_PROGRESS", "0")
     monkeypatch.setenv("CREWAI_DISABLE_TELEMETRY", "true")
     monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
-    # DE/DS author code via run_text_task; without a live LLM, return no code so
-    # run_authored_code deterministically falls back to the fixed sklearn snippets
-    # (the "real snippets" these path-coverage tests already rely on).
     monkeypatch.setattr("maads.codegen.run_text_task", lambda *a, **k: "")
 
 
@@ -52,21 +51,18 @@ def test_happy_path_all_substeps(mock_llm, titanic_state: CrispDMState, tmp_path
     mock_llm.side_effect = fake_llm_response
     artifact_dir = _artifact_dir(tmp_path)
     dispatched: list[str] = []
+    orig = pr.run_substep
 
-    orch = Orchestrator(titanic_state, artifact_dir)
-    orig_dispatch = orch._dispatch
-
-    def track(substep: str) -> None:
+    def track(ctx, substep: str) -> None:
         dispatched.append(substep)
-        orig_dispatch(substep)
+        orig(ctx, substep)
 
-    orch._dispatch = track  # type: ignore[method-assign]
-
-    plans = [Plan(action="advance", reason="ok") for _ in range(60)]
-    plan_iter = iter(plans)
-    orch.pm.plan = lambda _s: next(plan_iter, Plan(action="halt", reason="done"))  # type: ignore[method-assign]
-
-    orch.run()
+    with patch.object(pr, "run_substep", side_effect=track):
+        flow = make_flow(titanic_state, artifact_dir)
+        plans = [Plan(action="advance", reason="ok") for _ in range(60)]
+        plan_iter = iter(plans)
+        flow._pm.plan = lambda _s: next(plan_iter, Plan(action="halt", reason="done"))  # type: ignore[method-assign]
+        flow.run()
 
     assert titanic_state.dep.submission_path
     assert titanic_state.dep.experience_documentation
@@ -78,7 +74,7 @@ def test_happy_path_all_substeps(mock_llm, titanic_state: CrispDMState, tmp_path
 def test_loop_back_fires_and_records_history(mock_llm, titanic_state: CrispDMState, tmp_path: Path):
     mock_llm.side_effect = fake_llm_response
     artifact_dir = _artifact_dir(tmp_path)
-    orch = Orchestrator(titanic_state, artifact_dir)
+    flow = make_flow(titanic_state, artifact_dir)
 
     plans = iter([
         Plan(action="advance", reason="run 1.1"),
@@ -91,9 +87,8 @@ def test_loop_back_fires_and_records_history(mock_llm, titanic_state: CrispDMSta
         ),
         Plan(action="halt", reason="stop after loop"),
     ])
-    orch.pm.plan = lambda _s: next(plans)  # type: ignore[method-assign]
-
-    orch.run()
+    flow._pm.plan = lambda _s: next(plans)  # type: ignore[method-assign]
+    flow.run()
 
     assert titanic_state.loop_history
     assert titanic_state.loop_history[0].label == "B"
@@ -105,10 +100,9 @@ def test_loop_back_fires_and_records_history(mock_llm, titanic_state: CrispDMSta
 def test_pm_halt_stops_run(mock_llm, titanic_state: CrispDMState, tmp_path: Path):
     mock_llm.side_effect = fake_llm_response
     artifact_dir = _artifact_dir(tmp_path)
-    orch = Orchestrator(titanic_state, artifact_dir)
-    orch.pm.plan = lambda _s: Plan(action="halt", reason="user stop")  # type: ignore[method-assign]
-
-    orch.run()
+    flow = make_flow(titanic_state, artifact_dir)
+    flow._pm.plan = lambda _s: Plan(action="halt", reason="user stop")  # type: ignore[method-assign]
+    flow.run()
 
     assert titanic_state.halted
     assert titanic_state.halt_reason == "user stop"
@@ -118,15 +112,14 @@ def test_pm_halt_stops_run(mock_llm, titanic_state: CrispDMState, tmp_path: Path
 def test_dispatch_exception_halts(mock_llm, titanic_state: CrispDMState, tmp_path: Path):
     mock_llm.side_effect = fake_llm_response
     artifact_dir = _artifact_dir(tmp_path)
-    orch = Orchestrator(titanic_state, artifact_dir)
 
-    def boom(_substep: str) -> None:
+    def boom(_ctx, _substep: str) -> None:
         raise RuntimeError("snippet failed")
 
-    orch._dispatch = boom  # type: ignore[method-assign]
-    orch.pm.plan = lambda _s: Plan(action="advance", reason="ok")  # type: ignore[method-assign]
-
-    orch.run()
+    with patch.object(pr, "run_substep", side_effect=boom):
+        flow = make_flow(titanic_state, artifact_dir)
+        flow._pm.plan = lambda _s: Plan(action="advance", reason="ok")  # type: ignore[method-assign]
+        flow.run()
 
     assert titanic_state.halted
     assert "dispatch failed" in (titanic_state.halt_reason or "")
@@ -135,12 +128,11 @@ def test_dispatch_exception_halts(mock_llm, titanic_state: CrispDMState, tmp_pat
 @patch("maads.agents.run_json_task")
 def test_hard_cap_halts(mock_llm, titanic_state: CrispDMState, tmp_path: Path, monkeypatch):
     mock_llm.side_effect = fake_llm_response
-    monkeypatch.setattr("maads.orchestrator.MAX_PHASE_TRANSITIONS", 0)
+    monkeypatch.setattr(pr, "MAX_PHASE_TRANSITIONS", 0)
     artifact_dir = _artifact_dir(tmp_path)
-    orch = Orchestrator(titanic_state, artifact_dir)
-    orch.pm.plan = lambda _s: Plan(action="advance", reason="ok")  # type: ignore[method-assign]
-
-    orch.run()
+    flow = make_flow(titanic_state, artifact_dir)
+    flow._pm.plan = lambda _s: Plan(action="advance", reason="ok")  # type: ignore[method-assign]
+    flow.run()
 
     assert titanic_state.halted
     assert titanic_state.halt_reason == "hard cap exceeded"
@@ -152,10 +144,9 @@ def test_token_budget_halts(mock_llm, titanic_state: CrispDMState, tmp_path: Pat
     monkeypatch.setenv("MAX_TOKENS_PER_RUN", "100")
     titanic_state.token_spend["pm"] = 100
     artifact_dir = _artifact_dir(tmp_path)
-    orch = Orchestrator(titanic_state, artifact_dir)
-    orch.pm.plan = lambda _s: Plan(action="advance", reason="ok")  # type: ignore[method-assign]
-
-    orch.run()
+    flow = make_flow(titanic_state, artifact_dir)
+    flow._pm.plan = lambda _s: Plan(action="advance", reason="ok")  # type: ignore[method-assign]
+    flow.run()
 
     assert titanic_state.halted
     assert titanic_state.halt_reason == "token budget exceeded"
@@ -167,14 +158,13 @@ def test_prereq_skip_does_not_run_agent(mock_llm, titanic_state: CrispDMState, t
     titanic_state.substep = "1.4"
     assert titanic_state.substep_prereqs_satisfied("1.4") is False
     artifact_dir = _artifact_dir(tmp_path)
-    orch = Orchestrator(titanic_state, artifact_dir)
+    flow = make_flow(titanic_state, artifact_dir)
     plans = iter([
         Plan(action="advance", reason="try 1.4"),
         Plan(action="halt", reason="stop"),
     ])
-    orch.pm.plan = lambda _s: next(plans)  # type: ignore[method-assign]
-
-    orch.run()
+    flow._pm.plan = lambda _s: next(plans)  # type: ignore[method-assign]
+    flow.run()
 
     assert not titanic_state.bu.project_plan
     assert any("prereqs not satisfied for 1.4" in e.message for e in titanic_state.log)
@@ -198,13 +188,12 @@ def test_pm_halt_before_6_4_runs_review(mock_llm, titanic_state: CrispDMState, t
     titanic_state.substep = "6.4"
     titanic_state.dep.submission_path = str(artifact_dir / "submission.csv")
     titanic_state.dep.final_report_path = str(artifact_dir / "final_report.md")
-    orch = Orchestrator(titanic_state, artifact_dir)
-    orch.pm.plan = lambda _s: Plan(  # type: ignore[method-assign]
+    ctx = make_run_context(titanic_state, artifact_dir)
+    ctx.pm.plan = lambda _s: Plan(  # type: ignore[method-assign]
         action="halt",
         reason="Phase 6 completion requirements are met: phase_6_ready is true.",
     )
-
-    orch.run()
+    pr.run_phase_substeps(ctx, Phase.DEPLOYMENT)
 
     assert titanic_state.dep.experience_documentation
     assert any("ignored PM halt" in e.message for e in titanic_state.log)
@@ -216,8 +205,8 @@ def test_pm_halt_before_6_4_runs_review(mock_llm, titanic_state: CrispDMState, t
 def test_loop_blocked_when_cap_reached(mock_llm, titanic_state: CrispDMState, tmp_path: Path):
     mock_llm.side_effect = fake_llm_response
     artifact_dir = _artifact_dir(tmp_path)
-    orch = Orchestrator(titanic_state, artifact_dir)
-    orch._inner_loop_count = 3  # at MAX_INNER_LOOP_ITERATIONS
+    flow = make_flow(titanic_state, artifact_dir)
+    flow._ctx.inner_loop_count = 3
 
     plans = iter([
         Plan(
@@ -228,9 +217,62 @@ def test_loop_blocked_when_cap_reached(mock_llm, titanic_state: CrispDMState, tm
         ),
         Plan(action="halt", reason="stop"),
     ])
-    orch.pm.plan = lambda _s: next(plans)  # type: ignore[method-assign]
-
-    orch.run()
+    flow._pm.plan = lambda _s: next(plans)  # type: ignore[method-assign]
+    flow.run()
 
     assert not titanic_state.loop_history
     assert any("loop blocked" in e.message for e in titanic_state.log)
+
+
+@patch("maads.agents.run_json_task")
+def test_suggested_action_loop_a_on_quality_blockers(mock_llm, titanic_state: CrispDMState):
+    mock_llm.side_effect = fake_llm_response
+    titanic_state.substep = "3.1"
+    titanic_state.du.data_quality_report = {"blockers": ["Cabin >70% missing"]}
+    suggested = titanic_state._suggested_pm_action()
+    assert suggested is not None
+    assert suggested["loop_label"] == "A"
+    assert suggested["target_substep"] == "1.3"
+
+
+@patch("maads.agents.run_json_task")
+def test_loop_c_suggested_on_unmet_business_goal(mock_llm, tmp_path: Path):
+    mock_llm.side_effect = fake_llm_response
+    cfg = load_case_config(resolve_path("configs/titanic_loopdemo.yaml"))
+    state = CrispDMState.from_config(cfg)
+    state.substep = "5.2"
+    state.ev.assessment_of_dm_results = {"cv_score": 0.8, "threshold": 0.99, "meets": False}
+    suggested = state._suggested_pm_action()
+    assert suggested is not None
+    assert suggested["action"] == "loop_back"
+    assert suggested["loop_label"] == "C"
+
+
+@patch("maads.agents.run_json_task")
+def test_proof_milestone_degraded_then_loop_b(mock_llm, titanic_state: CrispDMState, tmp_path: Path):
+    """Degraded prep + validator findings → PM Loop B → rerun completes with submission."""
+    mock_llm.side_effect = fake_llm_response
+    artifact_dir = _artifact_dir(tmp_path)
+    titanic_state.record_degraded("data_engineer@3.2: baseline fallback")
+    titanic_state.validator_findings = ["derived FamilySize missing from parquet"]
+    titanic_state.substep = "5.1"
+    suggested = titanic_state._suggested_pm_action()
+    assert suggested and suggested["loop_label"] == "B"
+
+    flow = make_flow(titanic_state, artifact_dir)
+    plans = iter([
+        Plan(
+            action="loop_back",
+            loop_label="B",
+            loop_to_phase=3,
+            target_substep="3.2",
+            reason="address degraded prep",
+        ),
+        *[Plan(action="advance", reason="ok") for _ in range(60)],
+        Plan(action="halt", reason="done"),
+    ])
+    flow._pm.plan = lambda _s: next(plans, Plan(action="halt", reason="done"))  # type: ignore[method-assign]
+    flow.run()
+
+    assert titanic_state.loop_history and titanic_state.loop_history[0].label == "B"
+    assert titanic_state.dep.submission_path

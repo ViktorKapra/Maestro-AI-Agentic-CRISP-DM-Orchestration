@@ -212,6 +212,8 @@ class CrispDMState(BaseModel):
     # Deficits found by a state-artifact validator at the last phase transition;
     # a non-empty list is a Loop B signal the PM reads via view_for("pm").
     validator_findings: list[str] = Field(default_factory=list)
+    # Append-only signals when authored code fell back to baseline (Loop B trigger).
+    degraded_flags: list[str] = Field(default_factory=list)
     halted: bool = False
     halt_reason: str | None = None
 
@@ -224,6 +226,7 @@ class CrispDMState(BaseModel):
 
     log: list[LogEntry] = Field(default_factory=list)
     token_spend: dict[str, int] = Field(default_factory=dict)
+    token_spend_by_provider: dict[str, int] = Field(default_factory=dict)
 
     @classmethod
     def from_config(cls, config: CaseConfig) -> "CrispDMState":
@@ -242,8 +245,16 @@ class CrispDMState(BaseModel):
             label=label, from_phase=from_phase, to_phase=to_phase, reason=reason
         ))
 
-    def add_tokens(self, agent: str, n_tokens: int) -> None:
+    def add_tokens(self, agent: str, n_tokens: int, *, provider: str = "unknown") -> None:
         self.token_spend[agent] = self.token_spend.get(agent, 0) + n_tokens
+        self.token_spend_by_provider[provider] = (
+            self.token_spend_by_provider.get(provider, 0) + n_tokens
+        )
+
+    def record_degraded(self, flag: str) -> None:
+        """Append a degraded-run signal for the PM (Loop B)."""
+        if flag and flag not in self.degraded_flags:
+            self.degraded_flags.append(flag)
 
     # ── Prerequisite checks the orchestrator uses ─────────────────────────
 
@@ -275,6 +286,54 @@ class CrispDMState(BaseModel):
 
     # ── Token-economy views (see docs/TOKEN_BUDGET.md) ────────────────────
 
+    def _suggested_pm_action(self) -> dict[str, Any] | None:
+        """Deterministic loop hint for the PM at decision substeps (advisory)."""
+        sub = self.substep
+        if sub == "3.1":
+            blockers = _quality_blockers(self.du.data_quality_report)
+            if blockers:
+                return {
+                    "action": "loop_back",
+                    "loop_label": "A",
+                    "loop_to_phase": 1,
+                    "target_substep": "1.3",
+                    "reason": f"quality blockers present: {blockers[:3]}",
+                }
+        if sub == "5.1":
+            if self.validator_findings:
+                return {
+                    "action": "loop_back",
+                    "loop_label": "B",
+                    "loop_to_phase": 3,
+                    "target_substep": "3.2",
+                    "reason": f"validator findings: {self.validator_findings[:3]}",
+                }
+            if self.degraded_flags:
+                return {
+                    "action": "loop_back",
+                    "loop_label": "B",
+                    "loop_to_phase": 3,
+                    "target_substep": "3.2",
+                    "reason": f"degraded runs: {self.degraded_flags[:3]}",
+                }
+        if sub == "5.2":
+            assessment = self.ev.assessment_of_dm_results or {}
+            if assessment and not assessment.get("meets"):
+                loop_a_count = sum(1 for le in self.loop_history if le.label == "A")
+                if loop_a_count >= 2:
+                    return {
+                        "action": "halt",
+                        "reason": "business goal not met and Loop A already fired twice",
+                    }
+                return {
+                    "action": "loop_back",
+                    "loop_label": "C",
+                    "loop_to_phase": 1,
+                    "target_substep": "1.3",
+                    "reason": "business success criteria not met",
+                }
+        return None
+
     def view_for(self, agent_name: str) -> dict[str, Any]:
         """Minimal slice of state to send to an agent's prompt.
 
@@ -300,6 +359,8 @@ class CrispDMState(BaseModel):
             base["latest_model_assessment"] = _latest_model_assessment(self.md)
             base["outputs_status"] = _pm_outputs_status(self)
             base["validator_findings"] = list(self.validator_findings)
+            base["degraded_flags"] = list(self.degraded_flags)
+            base["suggested_action"] = self._suggested_pm_action()
             assessment = self.ev.assessment_of_dm_results or {}
             base["business_goal_met"] = bool(assessment.get("meets"))
         elif agent_name == "domain":

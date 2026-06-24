@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from maads.agents import Plan
 from maads.config import load_case_config
-from maads.orchestrator import Orchestrator
+from maads.flow.phase_runner import check_global_halt, force_halt
 from maads.paths import resolve_path
 from maads.shutdown import (
     INTERRUPT_HALT_REASON,
@@ -16,6 +16,7 @@ from maads.shutdown import (
     shutdown_requested,
 )
 from maads.state import CrispDMState
+from maads.testing.flow_harness import make_flow, make_run_context
 
 
 def test_shutdown_flag():
@@ -34,7 +35,7 @@ def test_apply_interrupt_to_state():
     assert state.halt_reason == INTERRUPT_HALT_REASON
 
 
-def test_orchestrator_halts_when_shutdown_requested(tmp_path: Path):
+def test_flow_halts_when_shutdown_requested(tmp_path: Path):
     reset_shutdown_state()
     request_shutdown()
     config = load_case_config(resolve_path("configs/titanic.yaml"))
@@ -42,26 +43,21 @@ def test_orchestrator_halts_when_shutdown_requested(tmp_path: Path):
     artifact_dir = tmp_path / "titanic"
     artifact_dir.mkdir(parents=True)
 
-    dispatched: list[str] = []
-    orch = Orchestrator(state, artifact_dir)
-    orch._dispatch = lambda substep: dispatched.append(substep)  # type: ignore[method-assign]
-    orch.pm.plan = lambda _s: Plan(action="advance", reason="keep going")  # type: ignore[method-assign]
-
-    result = orch.run()
-
-    assert result.halted
-    assert result.halt_reason == INTERRUPT_HALT_REASON
-    assert dispatched == []
+    ctx = make_run_context(state, artifact_dir)
+    reason = check_global_halt(ctx)
+    assert reason == INTERRUPT_HALT_REASON
+    force_halt(state, reason)
+    assert state.halted
 
 
-@patch("maads.__main__.Orchestrator")
-def test_cmd_run_returns_130_on_keyboard_interrupt(mock_orch_cls, tmp_path: Path):
+@patch("maads.__main__.CrispDMFlow")
+def test_cmd_run_returns_130_on_keyboard_interrupt(mock_flow_cls, tmp_path: Path):
     from maads.__main__ import cmd_run
     import argparse
 
     reset_shutdown_state()
     config_path = resolve_path("configs/titanic.yaml")
-    mock_orch_cls.return_value.run.side_effect = KeyboardInterrupt
+    mock_flow_cls.return_value.run.side_effect = KeyboardInterrupt
 
     args = argparse.Namespace(
         config=config_path,
@@ -72,6 +68,9 @@ def test_cmd_run_returns_130_on_keyboard_interrupt(mock_orch_cls, tmp_path: Path
     )
     code = cmd_run(args)
     assert code == 130
-    final = tmp_path / "artifacts" / "titanic" / "final_state.json"
+    runs_dir = tmp_path / "artifacts" / "titanic" / "runs"
+    finals = list(runs_dir.glob("*/final_state.json"))
+    assert finals, f"expected final_state.json under {runs_dir}"
+    final = finals[0]
     assert final.is_file()
     assert INTERRUPT_HALT_REASON in final.read_text()

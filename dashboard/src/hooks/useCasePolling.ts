@@ -4,6 +4,9 @@ import {
   fetchCommunications,
   fetchCommunicationsSummary,
   fetchGraph,
+  fetchProcess,
+  fetchRag,
+  fetchState,
   fetchStatus,
   fetchTraceSummary,
 } from "../shared/api";
@@ -63,6 +66,33 @@ export function useGraph(caseId: string | null) {
   return useQuery({
     queryKey: ["graph", caseId],
     queryFn: () => fetchGraph(caseId!),
+    enabled: !!caseId,
+    ...pollOptions,
+  });
+}
+
+export function useProcess(caseId: string | null) {
+  return useQuery({
+    queryKey: ["process", caseId],
+    queryFn: () => fetchProcess(caseId!),
+    enabled: !!caseId,
+    ...pollOptions,
+  });
+}
+
+export function useCrispDMState(caseId: string | null) {
+  return useQuery({
+    queryKey: ["crispdmState", caseId],
+    queryFn: () => fetchState(caseId!),
+    enabled: !!caseId,
+    ...pollOptions,
+  });
+}
+
+export function useRag(caseId: string | null) {
+  return useQuery({
+    queryKey: ["rag", caseId],
+    queryFn: () => fetchRag(caseId!),
     enabled: !!caseId,
     ...pollOptions,
   });

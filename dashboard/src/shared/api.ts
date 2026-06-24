@@ -2,7 +2,10 @@ import type {
   CaseSummary,
   CommunicationRecord,
   CommunicationsSummary,
+  CrispDMStatePayload,
   GraphPayload,
+  ProcessView,
+  RagView,
   StatusPayload,
   TraceSummary,
 } from "./types";
@@ -43,4 +46,16 @@ export function fetchCommunicationsSummary(
 
 export function fetchGraph(caseId: string): Promise<GraphPayload> {
   return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/graph`);
+}
+
+export function fetchProcess(caseId: string): Promise<ProcessView> {
+  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/process`);
+}
+
+export function fetchState(caseId: string): Promise<CrispDMStatePayload> {
+  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/state`);
+}
+
+export function fetchRag(caseId: string): Promise<RagView> {
+  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/rag`);
 }

@@ -4,12 +4,17 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from maads.state import SUBSTEP_NAMES, SUBSTEPS, Phase
-
-if TYPE_CHECKING:
-    from maads.state import CrispDMState
+from maads.conclusions import build_conclusions_summary
+from maads.state import (
+    SUBSTEP_NAMES,
+    SUBSTEPS,
+    CrispDMState,
+    Phase,
+    _pm_outputs_status,
+    _trim_log,
+)
 
 TOTAL_SUBSTEPS = sum(len(v) for v in SUBSTEPS.values())
 
@@ -69,6 +74,7 @@ def flush_status() -> None:
         "completed_substeps": _completed_substeps,
         "total_substeps": TOTAL_SUBSTEPS,
         "token_spend": dict(state.token_spend),
+        "token_spend_by_provider": dict(state.token_spend_by_provider),
         "halted": state.halted,
         "halt_reason": state.halt_reason,
         "artifact_dir": str(artifact_dir),
@@ -81,6 +87,44 @@ def flush_status() -> None:
         encoding="utf-8",
     )
     (artifact_dir / "status.md").write_text(_format_md(payload), encoding="utf-8")
+    process_payload = _build_process_snapshot(state)
+    (artifact_dir / "process.json").write_text(
+        json.dumps(process_payload, indent=2, default=str),
+        encoding="utf-8",
+    )
+    state_payload = _build_state_snapshot(state)
+    (artifact_dir / "state.json").write_text(
+        json.dumps(state_payload, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
+def _build_state_snapshot(state: CrispDMState) -> dict[str, Any]:
+    return {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "state": state.model_dump(mode="json"),
+    }
+
+
+def _conclusions_summary(state: CrispDMState) -> dict[str, Any]:
+    return build_conclusions_summary(state)
+
+
+def _build_process_snapshot(state: CrispDMState) -> dict[str, Any]:
+    return {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "outputs_status": _pm_outputs_status(state),
+        "loop_history": [le.model_dump(mode="json") for le in state.loop_history],
+        "validator_findings": list(state.validator_findings),
+        "recent_log": _trim_log(state.log, n=20),
+        "conclusions": _conclusions_summary(state),
+        "config": {
+            "problem_statement": state.config.problem_statement,
+            "problem_type": state.config.problem_type,
+            "target_column": state.config.target_column,
+            "evaluation_metric": state.config.evaluation_metric,
+        },
+    }
 
 
 def _format_md(payload: dict[str, Any]) -> str:

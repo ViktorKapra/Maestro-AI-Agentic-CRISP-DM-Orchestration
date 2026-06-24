@@ -1,0 +1,23 @@
+state_only:
+  description: 'Current CRISP-DM state (JSON):
+
+    {state_view}
+
+
+    {instruction}'
+  expected_output: A single JSON object, no prose, no Markdown fences.
+substep_json:
+  description: 'CRISP-DM substep {substep} ({substep_name}).
+
+    {instruction}
+
+
+    Relevant state (JSON):
+
+    {state_view}
+
+
+    Respond ONLY with JSON matching: {schema_hint}'
+  expected_output: A single JSON object, no prose, no Markdown fences.
+authored_code:
+  expected_output: A Python code block.

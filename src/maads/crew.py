@@ -1,12 +1,21 @@
-"""CrewAI plumbing: build LLMs, build agents, run a single-agent JSON task.
+"""CrewAI task assembly + kickoff: run one agent on one task and capture the output.
 
-This is the thin layer that replaces the deprecated `Agent` ABC. The agent
-*wrappers* in `agents.py` call `run_json_task(...)` to get an LLM decision/output;
-the deterministic orchestrator still drives the cycle.
+The agents themselves (personas, LLM tiering) are defined the idiomatic CrewAI way in
+`maads.crew_base` (`@CrewBase MaadsCrew`, driven by `config/agents.yaml`). This module
+is the per-call seam: `build_task_description` fetches the substep's agent via
+`crew_base.agent_for` and renders the task description from the `config/tasks.yaml`
+scaffolds; `_kickoff` wraps that agent+task in a one-agent `Crew` and kicks it off,
+folding token usage into `state.token_spend`. The agent *wrappers* in `agents.py` call
+`run_json_task(...)` / `run_text_task(...)`; the deterministic orchestrator drives the
+cycle.
 
-Model selection (no architectural compromise for any backend):
-    - MODEL=ollama/<name>  -> local Ollama (dev, free)
-    - otherwise            -> OpenAI, tiered per agent (PM / Data Scientist -> TOP)
+Model selection — CrewAI best practice: one dedicated ``LLM`` per ``Agent`` at
+construction time (see ``agent_for``). Resolution order:
+
+    1. ``MODEL_<AGENT>`` per-role override (e.g. ``MODEL_DEVELOPER``)
+    2. ``MODEL_CODE`` / ``OPENAI_MODEL_CODE`` for code-authoring roles
+    3. ``MODEL_JSON`` for structured-JSON roles (Ollama path)
+    4. ``MODEL`` default (Ollama) or OpenAI tiering (``agents.yaml`` tier field)
 """
 from __future__ import annotations
 
@@ -14,21 +23,29 @@ import json
 import os
 import re
 from contextvars import ContextVar
-from functools import lru_cache
+from pathlib import Path
 
-from crewai import LLM, Agent, Crew, Task
+from crewai import Agent, Crew, Task
 
+from maads.crew_base import agent_for, build_llm, reset_llm_caches, resolve_model_for_agent
 from maads.prompts import (
     AGENT_TASK_TEMPLATES,
-    AGENT_PROMPTS,
     STATE_ONLY_TASK_TEMPLATE,
     TASK_TEMPLATE,
 )
-from maads.prompts.identities.domain import domain_identity
 from maads.state import SUBSTEP_NAMES, CrispDMState
 
-# Per-agent OpenAI tier: PM and Data Scientist use the top model.
-_TOP_AGENTS = {"pm", "data_scientist"}
+__all__ = [
+    "build_llm",
+    "make_agent",
+    "resolve_model_for_agent",
+    "reset_llm_caches",
+    "build_task_description",
+    "pop_last_kickoff_output",
+    "run_json_task",
+    "run_text_task",
+    "CrewKickoffError",
+]
 
 _last_crew_output: ContextVar[str | None] = ContextVar("_last_crew_output", default=None)
 _last_crew_tokens: ContextVar[int | None] = ContextVar("_last_crew_tokens", default=None)
@@ -47,55 +64,100 @@ class CrewKickoffError(RuntimeError):
     """CrewAI kickoff failed (LLM timeout, provider error, etc.)."""
 
 
-def build_llm(agent_name: str) -> LLM:
-    """Return a CrewAI LLM for this agent, honoring MODEL / tiering env vars."""
-    model = os.getenv("MODEL")
-    if model and model.startswith("ollama/"):
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        kwargs: dict = {"model": model, "base_url": base_url}
-        timeout = os.getenv("OLLAMA_REQUEST_TIMEOUT")
-        if timeout:
-            try:
-                kwargs["timeout"] = int(timeout)
-            except ValueError:
-                pass
-        return LLM(**kwargs)
-    top = os.getenv("OPENAI_MODEL_TOP", "gpt-4o")
-    mid = os.getenv("OPENAI_MODEL_MID", "gpt-4o-mini")
-    return LLM(model=top if agent_name in _TOP_AGENTS else mid)
-
-
-@lru_cache(maxsize=32)
 def make_agent(agent_name: str, dataset_name: str = "") -> Agent:
-    """Build (once per process per dataset) the CrewAI Agent for a role."""
-    if agent_name == "domain" and dataset_name:
-        p = domain_identity(dataset_name)
-    else:
-        p = AGENT_PROMPTS[agent_name]
-    return Agent(
-        role=p["role"],
-        goal=p["goal"],
-        backstory=p["backstory"],
-        llm=build_llm(agent_name),
-        allow_delegation=False,
-        verbose=False,
+    """Back-compat shim — agents are now built by ``maads.crew_base.agent_for``."""
+    return agent_for(agent_name, dataset_name)
+
+
+def _strip_markdown_wrappers(text: str) -> str:
+    """Remove common LLM wrappers: fences, horizontal rules, leading/trailing noise."""
+    text = text.strip()
+    fence = re.match(
+        r"^```(?:json|JSON)?\s*\n?(.*?)\n?```\s*$",
+        text,
+        re.DOTALL,
     )
+    if fence:
+        text = fence.group(1).strip()
+    else:
+        text = re.sub(r"^```(?:json|JSON)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+    lines = [
+        ln
+        for ln in text.splitlines()
+        if not re.match(r"^\s*(-{3,}|\*{3,}|_{3,})\s*$", ln)
+    ]
+    return "\n".join(lines).strip()
+
+
+def _find_balanced_json(text: str) -> str | None:
+    """Extract the first top-level ``{...}`` object with balanced braces."""
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _repair_json(text: str) -> str:
+    """Fix common LLM JSON mistakes (e.g. trailing commas)."""
+    return re.sub(r",(\s*[}\]])", r"\1", text)
+
+
+def _try_parse_json(text: str) -> dict | None:
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _extract_json(text: str) -> dict | None:
-    """Parse JSON, with one lenient repair pass (strip fences / find the object)."""
+    """Parse JSON, cleaning up common LLM formatting before retrying."""
     if not text or not str(text).strip():
         return None
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        pass
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
+
+    stripped = _strip_markdown_wrappers(str(text))
+    candidates: list[str] = []
+    for candidate in (str(text).strip(), stripped):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        for body in (candidate, _repair_json(candidate)):
+            parsed = _try_parse_json(body)
+            if parsed is not None:
+                return parsed
+
+    for candidate in candidates:
+        fragment = _find_balanced_json(candidate)
+        if not fragment:
+            continue
+        for body in (fragment, _repair_json(fragment)):
+            parsed = _try_parse_json(body)
+            if parsed is not None:
+                return parsed
+
     return None
 
 
@@ -122,7 +184,7 @@ def build_task_description(
     """Assemble the CrewAI Task description; returns (description, state_view_json, agent)."""
     view = state.view_for(agent_name)
     dataset_name = state.case_id if agent_name == "domain" else ""
-    agent = make_agent(agent_name, dataset_name)
+    agent = agent_for(agent_name, dataset_name)
     state_view = json.dumps(view, default=str, ensure_ascii=False)
     template_kind = AGENT_TASK_TEMPLATES.get(agent_name, "substep_json")
     if template_kind == "state_only":
@@ -139,6 +201,18 @@ def build_task_description(
             schema_hint=schema_hint,
         )
     return description, state_view, agent
+
+
+def _resolve_llm_provider(agent_name: str) -> str:
+    """Infer provider label for token accounting."""
+    model = resolve_model_for_agent(agent_name)
+    if model.startswith("ollama/"):
+        return "ollama"
+    if "deepseek" in model.lower():
+        return "deepseek"
+    if os.getenv("OPENAI_API_KEY") or model.startswith("gpt-"):
+        return "openai"
+    return "other"
 
 
 def _kickoff(
@@ -179,7 +253,8 @@ def _kickoff(
     # Token accounting — record CrewAI usage on shared state.
     try:
         if total_tokens is not None:
-            state.add_tokens(agent_name, total_tokens)
+            provider = _resolve_llm_provider(agent_name)
+            state.add_tokens(agent_name, total_tokens, provider=provider)
     except (AttributeError, TypeError, ValueError):
         pass
     _check_token_budget(state)
@@ -191,6 +266,8 @@ def run_json_task(
     instruction: str,
     state: CrispDMState,
     schema_hint: str = "",
+    *,
+    artifact_dir: Path | None = None,
 ) -> dict | None:
     """Run one CrewAI task for `agent_name` and return parsed JSON (or None).
 
@@ -204,6 +281,19 @@ def run_json_task(
     )
     parsed = _extract_json(raw_output)
     if parsed is None and raw_output.strip():
+        if artifact_dir is not None:
+            from maads.debug import debug_json_parse
+
+            outcome = debug_json_parse(
+                state=state,
+                artifact_dir=artifact_dir,
+                requesting_agent=agent_name,
+                raw_text=raw_output,
+                schema_hint=schema_hint,
+                instruction=instruction,
+            )
+            if outcome.status == "FIXED" and outcome.payload is not None:
+                return outcome.payload
         raise CrewKickoffError(
             f"CrewAI returned non-JSON output for {agent_name} at substep {state.substep}"
         )

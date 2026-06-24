@@ -105,4 +105,139 @@ export interface GraphPayload {
   edges: FlowEdge[];
 }
 
-export type TabId = "overview" | "communications" | "architecture" | "timeline";
+export type TabId = "overview" | "process" | "state" | "communications" | "architecture" | "timeline" | "knowledge";
+
+export type SubstepStatus = "done" | "active" | "pending" | "skipped";
+export type PhaseStatus = "complete" | "active" | "pending";
+export type AgentStatus = "active" | "idle";
+
+export interface ProcessSubstep {
+  id: string;
+  name: string;
+  owner: string;
+  owner_label: string;
+  phase: number;
+  status: SubstepStatus;
+  duration_ms: number | null;
+}
+
+export interface ProcessPhase {
+  id: number;
+  name: string;
+  status: PhaseStatus;
+  ready: boolean;
+  substeps: ProcessSubstep[];
+}
+
+export interface TeamMember {
+  id: string;
+  label: string;
+  status: AgentStatus;
+  current_substep: string | null;
+  owned_substeps: string[];
+  recent_work: { agent: string; message: string; level: string }[];
+  tokens: number;
+}
+
+export interface ConclusionHighlight {
+  label: string;
+  value: string;
+}
+
+export interface ConclusionItem {
+  id: string;
+  name: string;
+  summary: string;
+  highlights?: ConclusionHighlight[];
+  artifact_paths?: Record<string, string>;
+}
+
+export interface ConclusionPhase {
+  id: number;
+  name: string;
+  items: ConclusionItem[];
+}
+
+export interface ProcessConclusions {
+  business_objectives?: string | null;
+  data_mining_goals?: string | null;
+  data_quality_blockers?: string[];
+  data_quality_tolerable?: string[];
+  dataset_paths?: Record<string, string>;
+  dataset_description?: string | null;
+  models?: { technique: string; cv_score: number | null; assessment: string | null }[];
+  chosen_model?: { technique: string; cv_score: number | null; assessment: string | null } | null;
+  assessment?: { cv_score?: number; meets?: boolean; threshold?: number } | null;
+  decision?: string | null;
+  submission_path?: string | null;
+  final_report_path?: string | null;
+  phases?: ConclusionPhase[];
+}
+
+export interface ProcessLoop {
+  label?: string;
+  from_phase?: number;
+  to_phase?: number;
+  reason?: string;
+  ts?: string;
+}
+
+export interface ProcessDeliverable {
+  label: string;
+  path: string;
+  exists: boolean;
+}
+
+export interface ProcessView {
+  updated_at?: string;
+  current_phase: number;
+  current_substep: string;
+  current_substep_name: string;
+  activity: string;
+  phases: ProcessPhase[];
+  substeps: ProcessSubstep[];
+  team: TeamMember[];
+  conclusions: ProcessConclusions;
+  config: {
+    problem_statement?: string;
+    problem_type?: string;
+    target_column?: string;
+    evaluation_metric?: string;
+  };
+  loops: ProcessLoop[];
+  deliverables: ProcessDeliverable[];
+  validator_findings: string[];
+  outputs_status: Record<string, boolean>;
+}
+
+export interface CrispDMStatePayload {
+  updated_at: string | null;
+  source: "live" | "final" | string;
+  state: Record<string, unknown>;
+}
+
+export interface RagCorpusFile {
+  name: string;
+  path: string;
+  size_bytes: number;
+  role: "shared" | "case" | "experience";
+}
+
+export interface RagPassage {
+  source: string;
+  text: string;
+}
+
+export interface RagView {
+  updated_at: string;
+  case_id: string;
+  embedding_backend: string;
+  embedding_model: string | null;
+  chunk_count: number;
+  crewai_knowledge_enabled: boolean;
+  corpus_files: RagCorpusFile[];
+  retrieval_query_preview: string;
+  retrieved_passages: RagPassage[];
+  domain_substeps_using_rag: string[];
+  consumer_agent: string;
+}

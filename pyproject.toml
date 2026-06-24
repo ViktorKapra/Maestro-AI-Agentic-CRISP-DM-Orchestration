@@ -13,6 +13,7 @@ dependencies = [
     # framework (>=1.10.1 required by openinference-instrumentation-crewai)
     "crewai>=1.10.1,<2.0",
     "crewai-tools>=1.10.1,<2.0",
+    "ollama>=0.4",  # CrewAI Knowledge embeddings when EMBEDDINGS_PROVIDER=ollama
     # ML stack (Phase 1 fixed-baseline modeling)
     "pandas>=2.1",
     "scikit-learn>=1.4",
@@ -38,6 +39,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["maads*"]
+
+# Ship the agent/task config and backstory prompts as package data (loaded via
+# importlib.resources, so they must be present in installed wheels too).
+[tool.setuptools.package-data]
+maads = ["config/*.yaml", "prompts/identities/backstories/*.md", "crews/**/config/*.yaml"]
 
 [tool.coverage.run]
 source = ["maads"]
