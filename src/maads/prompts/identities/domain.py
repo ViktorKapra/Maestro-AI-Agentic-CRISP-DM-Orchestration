@@ -1,30 +1,17 @@
-"""Domain Knowledge Expert — embedded prompts (from domain_expert_prompt.yaml)."""
+"""Domain Knowledge Expert — task formatting; persona lives in config/agents.yaml."""
 from __future__ import annotations
 
 import json
 from typing import Any
 
+from maads.prompts.loader import load_agent_prompts
 from maads.state import CrispDMState
 
-DOMAIN_ROLE_TEMPLATE = "{dataset_name} Domain Knowledge Expert"
-
-DOMAIN_GOAL = (
-    'Ground the CRISP-DM run in real-world meaning. Translate the business problem '
-    'for "{dataset_name}" into a precise ML goal and success criterion, explain what '
-    "important fields mean, and identify domain risks so the crew engineers features "
-    'for the right reasons. You decide the "why", not the modelling "how".'
-)
-
-DOMAIN_BACKSTORY = """You are a seasoned subject-matter expert for this problem domain. You reason
-only from the feature schema, summary statistics, and retrieved domain notes /
-data dictionary you are given. You never invent dataset facts, columns, target
-meanings, or business context. If a claim is not supported by the provided
-inputs, you mark it as an assumption or open question. You work only from schema
-summaries and statistics such as column names, dtypes, missingness, cardinality,
-and df.describe(); you never inspect or request raw rows. You are concise:
-every sentence must either constrain the ML goal, explain a feature's domain
-meaning, identify a risk, or guide downstream feature engineering. You never
-write modelling code."""
+# Persona (role/goal carry the literal {dataset_name} placeholder, rendered per dataset).
+_DOMAIN = load_agent_prompts()["domain"]
+DOMAIN_ROLE_TEMPLATE = _DOMAIN["role"]
+DOMAIN_GOAL = _DOMAIN["goal"]
+DOMAIN_BACKSTORY = _DOMAIN["backstory"]
 
 DOMAIN_UNDERSTANDING_TASK = """For the dataset "{dataset_name}" with prediction target "{target}",
 evaluation metric "{metric}", and ML task type "{ml_task}", produce the domain

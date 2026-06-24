@@ -1,12 +1,13 @@
-"""CrewAI plumbing: build LLMs, build agents, run a single-agent JSON task.
+"""CrewAI task assembly + kickoff: run one agent on one task and capture the output.
 
-This is the thin layer that replaces the deprecated `Agent` ABC. The agent
-*wrappers* in `agents.py` call `run_json_task(...)` to get an LLM decision/output;
-the deterministic orchestrator still drives the cycle.
-
-Model selection (no architectural compromise for any backend):
-    - MODEL=ollama/<name>  -> local Ollama (dev, free)
-    - otherwise            -> OpenAI, tiered per agent (PM / Data Scientist -> TOP)
+The agents themselves (personas, LLM tiering) are defined the idiomatic CrewAI way in
+`maads.crew_base` (`@CrewBase MaadsCrew`, driven by `config/agents.yaml`). This module
+is the per-call seam: `build_task_description` fetches the substep's agent via
+`crew_base.agent_for` and renders the task description from the `config/tasks.yaml`
+scaffolds; `_kickoff` wraps that agent+task in a one-agent `Crew` and kicks it off,
+folding token usage into `state.token_spend`. The agent *wrappers* in `agents.py` call
+`run_json_task(...)` / `run_text_task(...)`; the deterministic orchestrator drives the
+cycle.
 """
 from __future__ import annotations
 
@@ -14,21 +15,26 @@ import json
 import os
 import re
 from contextvars import ContextVar
-from functools import lru_cache
 
-from crewai import LLM, Agent, Crew, Task
+from crewai import Agent, Crew, Task
 
+from maads.crew_base import agent_for, build_llm
 from maads.prompts import (
     AGENT_TASK_TEMPLATES,
-    AGENT_PROMPTS,
     STATE_ONLY_TASK_TEMPLATE,
     TASK_TEMPLATE,
 )
-from maads.prompts.identities.domain import domain_identity
 from maads.state import SUBSTEP_NAMES, CrispDMState
 
-# Per-agent OpenAI tier: PM and Data Scientist use the top model.
-_TOP_AGENTS = {"pm", "data_scientist"}
+__all__ = [
+    "build_llm",
+    "make_agent",
+    "build_task_description",
+    "pop_last_kickoff_output",
+    "run_json_task",
+    "run_text_task",
+    "CrewKickoffError",
+]
 
 _last_crew_output: ContextVar[str | None] = ContextVar("_last_crew_output", default=None)
 _last_crew_tokens: ContextVar[int | None] = ContextVar("_last_crew_tokens", default=None)
@@ -47,39 +53,9 @@ class CrewKickoffError(RuntimeError):
     """CrewAI kickoff failed (LLM timeout, provider error, etc.)."""
 
 
-def build_llm(agent_name: str) -> LLM:
-    """Return a CrewAI LLM for this agent, honoring MODEL / tiering env vars."""
-    model = os.getenv("MODEL")
-    if model and model.startswith("ollama/"):
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        kwargs: dict = {"model": model, "base_url": base_url}
-        timeout = os.getenv("OLLAMA_REQUEST_TIMEOUT")
-        if timeout:
-            try:
-                kwargs["timeout"] = int(timeout)
-            except ValueError:
-                pass
-        return LLM(**kwargs)
-    top = os.getenv("OPENAI_MODEL_TOP", "gpt-4o")
-    mid = os.getenv("OPENAI_MODEL_MID", "gpt-4o-mini")
-    return LLM(model=top if agent_name in _TOP_AGENTS else mid)
-
-
-@lru_cache(maxsize=32)
-def make_agent(agent_name: str, dataset_name: str = "") -> Agent:
-    """Build (once per process per dataset) the CrewAI Agent for a role."""
-    if agent_name == "domain" and dataset_name:
-        p = domain_identity(dataset_name)
-    else:
-        p = AGENT_PROMPTS[agent_name]
-    return Agent(
-        role=p["role"],
-        goal=p["goal"],
-        backstory=p["backstory"],
-        llm=build_llm(agent_name),
-        allow_delegation=False,
-        verbose=False,
-    )
+def make_agent(agent_name: str, dataset_name: str = ""):
+    """Back-compat shim — agents are now built by ``maads.crew_base.agent_for``."""
+    return agent_for(agent_name, dataset_name)
 
 
 def _extract_json(text: str) -> dict | None:
@@ -122,7 +98,7 @@ def build_task_description(
     """Assemble the CrewAI Task description; returns (description, state_view_json, agent)."""
     view = state.view_for(agent_name)
     dataset_name = state.case_id if agent_name == "domain" else ""
-    agent = make_agent(agent_name, dataset_name)
+    agent = agent_for(agent_name, dataset_name)
     state_view = json.dumps(view, default=str, ensure_ascii=False)
     template_kind = AGENT_TASK_TEMPLATES.get(agent_name, "substep_json")
     if template_kind == "state_only":

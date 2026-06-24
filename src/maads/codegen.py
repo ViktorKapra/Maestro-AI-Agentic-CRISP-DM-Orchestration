@@ -125,6 +125,11 @@ def run_authored_code(
     prior_error: str | None = None
 
     for attempt in range(1, max_retries + 1):
+        def warn(outcome: str) -> None:
+            state.append_log(
+                agent_name, f"authored code attempt {attempt} -> {outcome}", level="warn"
+            )
+
         prompt = _build_instruction(
             instruction, header_vars, contract_hint, prior_code, prior_error
         )
@@ -132,13 +137,13 @@ def run_authored_code(
             raw = run_text_task(agent_name, prompt, state, expected_output="A Python code block.")
         except (CrewKickoffError, RuntimeError) as exc:
             prior_error = f"LLM call failed: {exc}"
-            state.append_log(agent_name, f"authored code attempt {attempt} -> LLM error", level="warn")
+            warn("LLM error")
             continue
 
         code = _extract_code(raw)
         if not code:
             prior_error = "no Python code block found in the response"
-            state.append_log(agent_name, f"authored code attempt {attempt} -> no code", level="warn")
+            warn("no code")
             continue
 
         full_code = header + code
@@ -146,21 +151,21 @@ def run_authored_code(
         if not res.ok:
             prior_code = code
             prior_error = (res.stderr or "").strip()[-1500:] or "non-zero exit, no stderr"
-            state.append_log(agent_name, f"authored code attempt {attempt} -> failed", level="warn")
+            warn("failed")
             continue
 
         payload = _last_json_line(res.stdout)
         if payload is None:
             prior_code = code
             prior_error = "code ran but printed no JSON object on its last line"
-            state.append_log(agent_name, f"authored code attempt {attempt} -> no JSON output", level="warn")
+            warn("no JSON output")
             continue
 
         errors = contract(payload)
         if errors:
             prior_code = code
             prior_error = "output failed validation: " + "; ".join(errors)
-            state.append_log(agent_name, f"authored code attempt {attempt} -> invalid output", level="warn")
+            warn("invalid output")
             continue
 
         state.append_log(agent_name, f"authored code attempt {attempt} -> ok")

@@ -19,8 +19,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from maads.baselines import (
+    _COLLECT_SRC,
+    _DESCRIBE_SRC,
+    _EXPLORE_SRC,
+    _PREP_SRC,
+    _QUALITY_SRC,
+    _SUBMIT_SRC,
+    _TRAIN_SRC,
+)
 from maads.codegen import run_authored_code
 from maads.crew import CrewKickoffError, run_json_task
+from maads.paths import resolve_path
 from maads.prompts import PM_DECISION_INSTRUCTION
 from maads.prompts.identities.data_engineer import format_data_engineer_task
 from maads.prompts.identities.data_scientist import format_data_scientist_task
@@ -69,9 +79,6 @@ def _tools(artifact_dir: Path) -> tuple[FileIO, PythonExec]:
     return FileIO(artifact_dir), PythonExec(workdir=artifact_dir / "sandbox")
 
 
-from maads.paths import resolve_path
-
-
 def _abspath(rel: str) -> str:
     """Resolve a config-relative data path to an absolute string for snippets."""
     return str(resolve_path(rel))
@@ -91,118 +98,6 @@ def _run_snippet(pyexec: PythonExec, src: str, **subs: str) -> dict:
     return json.loads(res.stdout.strip().splitlines()[-1])
 
 
-# ── Fixed baseline snippets (Phase 1) ───────────────────────────────────────
-
-_PIPE_HELPER = '''
-def build_pipeline(X):
-    from sklearn.compose import ColumnTransformer
-    from sklearn.pipeline import Pipeline
-    from sklearn.impute import SimpleImputer
-    from sklearn.preprocessing import OneHotEncoder, StandardScaler
-    from sklearn.ensemble import GradientBoostingClassifier
-    num = X.select_dtypes(include="number").columns.tolist()
-    cat = [c for c in X.select_dtypes(exclude="number").columns if X[c].nunique() <= 20]
-    pre = ColumnTransformer([
-        ("num", Pipeline([("imp", SimpleImputer(strategy="median")), ("sc", StandardScaler())]), num),
-        ("cat", Pipeline([("imp", SimpleImputer(strategy="most_frequent")), ("oh", OneHotEncoder(handle_unknown="ignore"))]), cat),
-    ])
-    pipe = Pipeline([("pre", pre), ("gb", GradientBoostingClassifier(random_state=0))])
-    return pipe, num + cat
-'''
-
-_COLLECT_SRC = '''
-import pandas as pd, json
-tr = pd.read_csv(r"__TRAIN__"); te = pd.read_csv(r"__TEST__")
-print(json.dumps({"train_rows": int(len(tr)), "test_rows": int(len(te)), "columns": list(tr.columns)}))
-'''
-
-_DESCRIBE_SRC = '''
-import pandas as pd, json
-df = pd.read_csv(r"__TRAIN__")
-print(json.dumps({
-    "n_rows": int(len(df)), "n_cols": int(df.shape[1]),
-    "columns": list(df.columns),
-    "dtypes": {c: str(t) for c, t in df.dtypes.items()},
-    "missing": {c: int(df[c].isna().sum()) for c in df.columns},
-    "n_unique": {c: int(df[c].nunique()) for c in df.columns},
-}))
-'''
-
-_EXPLORE_SRC = '''
-import pandas as pd, json
-df = pd.read_csv(r"__TRAIN__")
-target = "__TARGET__"
-out = {"n_rows": int(len(df)), "target": target}
-if target in df.columns:
-    out["target_distribution"] = {str(k): int(v) for k, v in df[target].value_counts().items()}
-    out["target_missing"] = int(df[target].isna().sum())
-print(json.dumps(out))
-'''
-
-_QUALITY_SRC = '''
-import pandas as pd, json
-df = pd.read_csv(r"__TRAIN__")
-target = "__TARGET__"
-blockers = []; tolerable = []
-for c in df.columns:
-    miss = float(df[c].isna().mean())
-    if miss > 0.4:
-        blockers.append(c + ": %.0f%% missing" % (miss * 100))
-    elif miss > 0:
-        tolerable.append(c + ": %.0f%% missing (imputable)" % (miss * 100))
-    if int(df[c].nunique(dropna=True)) <= 1:
-        blockers.append(c + ": constant column")
-if bool(df.duplicated().any()):
-    tolerable.append(str(int(df.duplicated().sum())) + " duplicate rows")
-if target in df.columns and bool(df[target].isna().any()):
-    blockers.append(target + ": target has missing values")
-print(json.dumps({"blockers": blockers, "tolerable": tolerable}))
-'''
-
-_PREP_SRC = '''
-import pandas as pd, json, os
-train = pd.read_csv(r"__TRAIN__"); test = pd.read_csv(r"__TEST__")
-os.makedirs(r"__OUTDIR__", exist_ok=True)
-tp = os.path.join(r"__OUTDIR__", "train.parquet")
-sp = os.path.join(r"__OUTDIR__", "test.parquet")
-train.to_parquet(tp); test.to_parquet(sp)
-print(json.dumps({"train": tp, "test": sp, "n_train": int(len(train)), "n_test": int(len(test)),
-                  "derived": [], "dropped": []}))
-'''
-
-_TRAIN_SRC = _PIPE_HELPER + '''
-import pandas as pd, json
-from sklearn.model_selection import cross_val_score, StratifiedKFold
-train = pd.read_parquet(r"__TRAIN__")
-target = "__TARGET__"; idc = "__ID__"
-y = train[target]
-X = train.drop(columns=[c for c in (target, idc) if c in train.columns])
-pipe, feats = build_pipeline(X)
-cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
-scores = cross_val_score(pipe, X[feats], y, cv=cv, scoring="accuracy")
-print(json.dumps({"technique": "gradient_boosting", "cv_score": float(scores.mean()),
-                  "cv_std": float(scores.std()), "n_features": int(len(feats))}))
-'''
-
-_SUBMIT_SRC = _PIPE_HELPER + '''
-import pandas as pd, json
-train = pd.read_parquet(r"__TRAIN__"); test = pd.read_parquet(r"__TEST__")
-target = "__TARGET__"; idc = "__ID__"
-y = train[target]
-X = train.drop(columns=[c for c in (target, idc) if c in train.columns])
-pipe, feats = build_pipeline(X)
-pipe.fit(X[feats], y)
-Xt = test.reindex(columns=feats, fill_value=0)
-preds = pipe.predict(Xt)
-sub = pd.DataFrame({idc: test[idc], target: preds.astype(int)})
-sample = pd.read_csv(r"__SAMPLE__")
-assert list(sub.columns) == list(sample.columns), "columns %s != %s" % (list(sub.columns), list(sample.columns))
-assert len(sub) == len(sample), "rows %d != %d" % (len(sub), len(sample))
-sub.to_csv(r"__OUT__", index=False)
-print(json.dumps({"submission_path": r"__OUT__", "rows": int(len(sub))}))
-'''
-
-
 # ── 1. Project Manager ──────────────────────────────────────────────────────
 
 class ProjectManagerAgent:
@@ -218,22 +113,18 @@ class ProjectManagerAgent:
             data = run_json_task(self.name, PM_DECISION_INSTRUCTION, state)
         except (CrewKickoffError, RuntimeError) as exc:
             return Plan(action="halt", reason=f"PM LLM call failed: {exc}")
-        if data:
-            action = data.get("action")
-            if action in {"advance", "loop_back", "halt"}:
-                loop_label = data.get("loop_label")
-                if loop_label in ("null", "None", ""):
-                    loop_label = None
-                return Plan(
-                    action=action,
-                    target_substep=data.get("target_substep") or None,
-                    loop_label=loop_label,
-                    loop_to_phase=_coerce_phase(data.get("loop_to_phase")),
-                    reason=str(data.get("reason", "")),
-                )
+        action = (data or {}).get("action")
+        if action not in {"advance", "loop_back", "halt"}:
+            return Plan(action="halt", reason="PM returned unusable JSON directive")
+        loop_label = data.get("loop_label")
+        if loop_label in ("null", "None", ""):
+            loop_label = None
         return Plan(
-            action="halt",
-            reason="PM returned unusable JSON directive",
+            action=action,
+            target_substep=data.get("target_substep") or None,
+            loop_label=loop_label,
+            loop_to_phase=_coerce_phase(data.get("loop_to_phase")),
+            reason=str(data.get("reason", "")),
         )
 
     def act(self, state: CrispDMState) -> StateDelta:
@@ -338,21 +229,59 @@ class DomainExpertAgent:
         self.artifact_dir = artifact_dir
         self.fileio, self.pyexec = _tools(artifact_dir)
 
+    def _run_domain_understanding(self, state: CrispDMState) -> StateDelta:
+        instruction, schema_hint = format_domain_understanding_task(state)
+        data = run_json_task(self.name, instruction, state, schema_hint=schema_hint) or {}
+        return _apply_domain_understanding(data, state)
+
     def act(self, state: CrispDMState) -> StateDelta:
         s = state.substep
         if s == "1.1":
-            instruction, schema_hint = format_domain_understanding_task(state)
-            data = run_json_task(self.name, instruction, state, schema_hint=schema_hint) or {}
-            return _apply_domain_understanding(data, state)
+            return self._run_domain_understanding(state)
         if s == "1.2":
             return StateDelta(notes="1.2 covered by domain understanding at 1.1")
         if s == "1.3":
             if state.du.data_quality_report:
-                instruction, schema_hint = format_domain_understanding_task(state)
-                data = run_json_task(self.name, instruction, state, schema_hint=schema_hint) or {}
-                return _apply_domain_understanding(data, state)
+                return self._run_domain_understanding(state)
             return StateDelta(notes="1.3 covered by domain understanding at 1.1")
         return StateDelta(notes=f"Domain no-op for {s}")
+
+
+# ── Shared act() for the execution-evidence agents (DE, DS) ─────────────────
+
+def _evidence_backed_act(
+    agent: Any,
+    state: CrispDMState,
+    owned: set[str],
+    evidence_fn: Any,
+    format_fn: Any,
+    apply_fn: Any,
+) -> StateDelta:
+    """The common cycle DE and DS share for an owned substep.
+
+    Author and run the substep's code for measured evidence (self-debug +
+    fallback live in `run_authored_code`), ask the LLM to narrate/enrich it, then
+    map the merged result into state. "Measured execution wins" is enforced
+    inside each `apply_fn`. Agents that don't own the substep no-op.
+    """
+    s = state.substep
+    if s not in owned:
+        return StateDelta(notes=f"{agent.name} no-op for {s}")
+
+    execution: dict[str, Any] = {}
+    try:
+        execution = evidence_fn(agent.pyexec, state, s, agent.artifact_dir)
+    except RuntimeError:
+        pass
+
+    instruction, schema_hint = format_fn(
+        state, agent.artifact_dir, execution_evidence=execution or None,
+    )
+    try:
+        data = run_json_task(agent.name, instruction, state, schema_hint=schema_hint) or {}
+    except (CrewKickoffError, RuntimeError):
+        data = {}
+    return apply_fn(data, state, s, execution)
 
 
 # ── 3. Data Engineer ────────────────────────────────────────────────────────
@@ -553,26 +482,11 @@ class DataEngineerAgent:
         self.fileio, self.pyexec = _tools(artifact_dir)
 
     def act(self, state: CrispDMState) -> StateDelta:
-        s = state.substep
-        if s not in _DE_OWNED_SUBSTEPS:
-            return StateDelta(notes=f"DE no-op for {s}")
-
-        execution: dict[str, Any] = {}
-        try:
-            execution = _de_execution_evidence(
-                self.pyexec, state, s, self.artifact_dir,
-            )
-        except RuntimeError:
-            pass
-
-        instruction, schema_hint = format_data_engineer_task(
-            state, self.artifact_dir, execution_evidence=execution or None,
+        return _evidence_backed_act(
+            self, state, _DE_OWNED_SUBSTEPS,
+            _de_execution_evidence, format_data_engineer_task,
+            _apply_data_engineer_response,
         )
-        try:
-            data = run_json_task(self.name, instruction, state, schema_hint=schema_hint) or {}
-        except (CrewKickoffError, RuntimeError):
-            data = {}
-        return _apply_data_engineer_response(data, state, s, execution)
 
 
 # ── 4. Data Scientist ───────────────────────────────────────────────────────
@@ -584,6 +498,7 @@ def _ds_execution_evidence(
     pyexec: PythonExec,
     state: CrispDMState,
     substep: str,
+    artifact_dir: Path | None = None,  # unused; kept for a uniform evidence_fn signature
 ) -> dict[str, Any]:
     """Have the Data Scientist author and run the code for its owned substep."""
     train = _abspath(state.config.data.train_csv)
@@ -735,24 +650,11 @@ class DataScientistAgent:
         self.fileio, self.pyexec = _tools(artifact_dir)
 
     def act(self, state: CrispDMState) -> StateDelta:
-        s = state.substep
-        if s not in _DS_OWNED_SUBSTEPS:
-            return StateDelta(notes=f"DS no-op for {s}")
-
-        execution: dict[str, Any] = {}
-        try:
-            execution = _ds_execution_evidence(self.pyexec, state, s)
-        except RuntimeError:
-            pass
-
-        instruction, schema_hint = format_data_scientist_task(
-            state, self.artifact_dir, execution_evidence=execution or None,
+        return _evidence_backed_act(
+            self, state, _DS_OWNED_SUBSTEPS,
+            _ds_execution_evidence, format_data_scientist_task,
+            _apply_data_scientist_response,
         )
-        try:
-            data = run_json_task(self.name, instruction, state, schema_hint=schema_hint) or {}
-        except (CrewKickoffError, RuntimeError):
-            data = {}
-        return _apply_data_scientist_response(data, state, s, execution)
 
 
 # ── 5. Developer ────────────────────────────────────────────────────────────
