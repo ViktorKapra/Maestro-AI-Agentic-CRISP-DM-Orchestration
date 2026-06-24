@@ -6,10 +6,14 @@ you pick, so it isn't tested here.
 """
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
+
+import pytest
 
 from maads.config import load_case_config
 from maads.data_utils import CASE_SHORTHANDS, download_kaggle_competition
+from maads.prompts import AGENT_PROMPTS
 from maads.state import (
     CrispDMState,
     ModelRun,
@@ -17,6 +21,7 @@ from maads.state import (
     SUBSTEPS,
     SUBSTEP_NAMES,
     SUBSTEP_OWNER,
+    next_substep,
 )
 
 
@@ -99,14 +104,8 @@ def test_case_shorthands_are_just_a_convenience():
     """
     assert set(CASE_SHORTHANDS) == {"titanic", "house_prices", "disaster_tweets"}
     # The download function used directly must take an arbitrary slug.
-    import inspect
     sig = inspect.signature(download_kaggle_competition)
     assert "slug" in sig.parameters
-
-import pytest
-
-from maads.prompts import AGENT_PROMPTS
-from maads.state import next_substep
 
 
 @pytest.mark.parametrize("agent_id", list(AGENT_PROMPTS))

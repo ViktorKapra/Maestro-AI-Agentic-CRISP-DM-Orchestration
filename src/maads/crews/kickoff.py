@@ -25,15 +25,3 @@ def kickoff_json(
         artifact_dir=artifact_dir,
     )
 
-
-def kickoff_text(
-    agent_name: str,
-    instruction: str,
-    state: CrispDMState,
-    expected_output: str = "The requested output.",
-) -> str:
-    """Run one text/code task for a phase crew substep."""
-    from maads.agents import run_text_task
-
-    return run_text_task(agent_name, instruction, state, expected_output=expected_output)
-

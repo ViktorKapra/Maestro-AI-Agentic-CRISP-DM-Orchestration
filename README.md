@@ -6,7 +6,7 @@ process model. The **Project Manager** orchestrates each turn; specialist agents
 powers LLM calls; a typed shared state (`CrispDMState`) and trace tooling make
 runs observable.
 
-See [`docs/plan.md`](docs/plan.md) for the canonical roadmap and audit notes.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the Flow graph and module layout.
 
 ## Project layout
 
@@ -53,8 +53,6 @@ Runs via **CrewAI Flow** (`CrispDMFlow`).
 ```bash
 python -m maads flow plot
 ```
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the Flow graph and module layout.
 
 While running, watch `artifacts/titanic/status.json` or the stderr progress bar.
 After completion, inspect `artifacts/titanic/trace/` for timelines, diagrams, and

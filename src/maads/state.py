@@ -13,8 +13,8 @@ Two design rules:
 
 When reading or writing state inside an agent prompt, use the
 `view_for(agent_name)` helper at the bottom of this file. Sending the
-entire state to every LLM call burns the token budget — see
-docs/TOKEN_BUDGET.md.
+entire state to every LLM call burns the token budget — use
+`view_for(agent_name)` instead (see its docstring below).
 """
 from __future__ import annotations
 
@@ -284,7 +284,7 @@ class CrispDMState(BaseModel):
             return False
         return True
 
-    # ── Token-economy views (see docs/TOKEN_BUDGET.md) ────────────────────
+    # ── Token-economy views (see view_for docstring) ──────────────────────
 
     def _suggested_pm_action(self) -> dict[str, Any] | None:
         """Deterministic loop hint for the PM at decision substeps (advisory)."""
