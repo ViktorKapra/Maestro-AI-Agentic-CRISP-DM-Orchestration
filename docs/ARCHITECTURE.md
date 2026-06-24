@@ -33,7 +33,7 @@ flowchart TD
 | `flow/phase_runner.py` | Shared substep dispatch, advance, loops, caps |
 | `flow/routers.py` | PM checkpoint routing helpers |
 | `flow/tracing.py` | Trace + status flush hooks for flow steps |
-| `crews/*_crew/` | Phase-scoped `@CrewBase` crews with YAML config |
+| `crews/*_crew/` | Phase-scoped `@CrewBase` crews; shared `agents.yaml`, per-phase `tasks.yaml` |
 | `capabilities/` | Sandbox execution + JSON apply |
 | `state.py` | `CrispDMState` — single source of truth |
 

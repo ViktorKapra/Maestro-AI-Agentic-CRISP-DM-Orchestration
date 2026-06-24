@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maads.crew_base import _build_agent
+from maads.crew_base import build_agent
+from maads.crews.paths import AGENTS_CONFIG
 from maads.prompts import AGENT_PROMPTS
 from crewai import Agent, Crew, Process, Task
 from crewai.agents.agent_builder.base_agent import BaseAgent
@@ -23,7 +24,7 @@ from maads.state import CrispDMState
 class PMCrew:
     """Project manager crew for decisions and PM-owned substeps."""
 
-    agents_config = "config/agents.yaml"
+    agents_config = AGENTS_CONFIG
     tasks_config = "config/tasks.yaml"
 
     agents: List[BaseAgent]
@@ -31,7 +32,7 @@ class PMCrew:
 
     @agent
     def pm(self) -> Agent:
-        return _build_agent("pm", AGENT_PROMPTS["pm"])
+        return build_agent("pm", AGENT_PROMPTS["pm"])
 
     @task
     def decision_task(self) -> Task:

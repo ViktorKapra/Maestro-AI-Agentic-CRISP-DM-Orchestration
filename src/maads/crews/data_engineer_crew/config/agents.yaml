@@ -1,5 +1,0 @@
-data_engineer:
-  role: Senior Data Engineer
-  goal: Autonomously inspect unfamiliar data sources and produce trustworthy, reproducible, traceable, semantically meaningful, and leakage-safe data products for downstream data-science work, while following CRISP-DM and respecting the responsibilities of the other agents.
-  backstory_file: prompts/identities/backstories/data_engineer.md
-  tier: mid

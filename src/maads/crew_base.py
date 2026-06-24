@@ -112,7 +112,7 @@ def _tools_for(name: str) -> list[Any]:
     return []
 
 
-def _build_agent(name: str, persona: dict[str, str], *, case_id: str = "") -> Agent:
+def build_agent(name: str, persona: dict[str, str], *, case_id: str = "") -> Agent:
     """Build a CrewAI Agent from persona + tiered LLM + skills/tools/knowledge."""
     kwargs: dict[str, Any] = {
         "role": persona["role"],
@@ -143,23 +143,23 @@ class MaadsCrew:
 
     @agent
     def pm(self) -> Agent:
-        return _build_agent("pm", AGENT_PROMPTS["pm"])
+        return build_agent("pm", AGENT_PROMPTS["pm"])
 
     @agent
     def domain(self) -> Agent:
-        return _build_agent("domain", AGENT_PROMPTS["domain"])
+        return build_agent("domain", AGENT_PROMPTS["domain"])
 
     @agent
     def data_engineer(self) -> Agent:
-        return _build_agent("data_engineer", AGENT_PROMPTS["data_engineer"])
+        return build_agent("data_engineer", AGENT_PROMPTS["data_engineer"])
 
     @agent
     def data_scientist(self) -> Agent:
-        return _build_agent("data_scientist", AGENT_PROMPTS["data_scientist"])
+        return build_agent("data_scientist", AGENT_PROMPTS["data_scientist"])
 
     @agent
     def developer(self) -> Agent:
-        return _build_agent("developer", AGENT_PROMPTS["developer"])
+        return build_agent("developer", AGENT_PROMPTS["developer"])
 
     @task
     def state_only_task(self) -> Task:
@@ -195,9 +195,9 @@ def agent_for(name: str, dataset_name: str = "") -> Agent:
     """
     case_id = dataset_name
     if name == "domain" and dataset_name:
-        return _build_agent("domain", domain_identity(dataset_name), case_id=case_id)
+        return build_agent("domain", domain_identity(dataset_name), case_id=case_id)
     if name == "domain" and case_id:
-        return _build_agent("domain", AGENT_PROMPTS["domain"], case_id=case_id)
+        return build_agent("domain", AGENT_PROMPTS["domain"], case_id=case_id)
     return _AGENT_METHODS[name]()
 
 

@@ -6,13 +6,14 @@ from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.project import CrewBase, agent, crew, task
 from typing import List
 
-from maads.crew_base import _build_agent
+from maads.crew_base import build_agent
+from maads.crews.paths import AGENTS_CONFIG
 from maads.prompts import AGENT_PROMPTS
 
 
 @CrewBase
 class DeveloperCrew:
-    agents_config = "config/agents.yaml"
+    agents_config = AGENTS_CONFIG
     tasks_config = "config/tasks.yaml"
 
     agents: List[BaseAgent]
@@ -20,7 +21,7 @@ class DeveloperCrew:
 
     @agent
     def developer(self) -> Agent:
-        return _build_agent("developer", AGENT_PROMPTS["developer"])
+        return build_agent("developer", AGENT_PROMPTS["developer"])
 
     @task
     def substep_json(self) -> Task:

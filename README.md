@@ -14,12 +14,14 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the Flow graph and module
 configs/                  Case YAML files (titanic, house_prices, disaster_tweets)
 data/                     Downloaded competition CSVs
 artifacts/<case>/         Per-run outputs (submission, trace, final_state.json)
-src/maads/                Installable Python package
+src/maads/                Installable Python package (src layout)
+  config/                 Canonical agents.yaml + tasks.yaml (CrewAI)
   flow/                   CrewAI Flow orchestration (CrispDMFlow)
-  crews/                  Phase-scoped @CrewBase crews
+  crews/                  Phase-scoped @CrewBase crews (per-phase tasks.yaml)
   agents.py               Five agent wrappers
   crew.py                 CrewAI LLM seam
   observability/          Trace export (timeline, narrative, diagrams)
+tests/                    Pytest suite (outside the installable package)
 ```
 
 ## Setup
@@ -46,6 +48,8 @@ python -m maads data download --case titanic
 
 ```bash
 python -m maads run --case titanic
+# or, after install:
+maads run --case titanic
 ```
 
 Runs via **CrewAI Flow** (`CrispDMFlow`).
@@ -95,11 +99,11 @@ Communications contain full prompts — local use only.
 
 ```bash
 # Fast path-coverage run (mocked LLM, ~1 min)
-MAADS_TRACE=0 coverage run -m pytest src/maads/test_path_coverage.py -q
+MAADS_TRACE=0 coverage run -m pytest tests/test_path_coverage.py -q
 coverage report --show-missing
 
 # Full test suite
-pytest src/maads/
+pytest
 ```
 
 ## CLI reference

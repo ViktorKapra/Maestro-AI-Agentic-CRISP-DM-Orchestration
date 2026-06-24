@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maads.crew_base import _build_agent
+from maads.crew_base import build_agent
+from maads.crews.paths import AGENTS_CONFIG
 from maads.prompts import AGENT_PROMPTS
 from crewai import Agent, Crew, Process, Task
 from crewai.agents.agent_builder.base_agent import BaseAgent
@@ -19,7 +20,7 @@ _OWNED = frozenset({"2.3", "4.1", "4.2", "4.3", "4.4", "5.1"})
 
 @CrewBase
 class DataScientistCrew:
-    agents_config = "config/agents.yaml"
+    agents_config = AGENTS_CONFIG
     tasks_config = "config/tasks.yaml"
 
     agents: List[BaseAgent]
@@ -27,7 +28,7 @@ class DataScientistCrew:
 
     @agent
     def data_scientist(self) -> Agent:
-        return _build_agent("data_scientist", AGENT_PROMPTS["data_scientist"])
+        return build_agent("data_scientist", AGENT_PROMPTS["data_scientist"])
 
     @task
     def substep_json(self) -> Task:

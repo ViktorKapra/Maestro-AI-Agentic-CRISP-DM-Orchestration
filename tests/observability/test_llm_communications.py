@@ -208,7 +208,9 @@ def test_traced_run_json_task_captures_communication(MockCrew, monkeypatch: pyte
     from maads.observability.patches import apply_patches
     from maads.state import CrispDMState
 
-    repo = Path(__file__).resolve().parents[3]
+    from maads.paths import repo_root
+
+    repo = repo_root()
     cfg = load_case_config(repo / "configs" / "titanic.yaml")
 
     reset_collector()

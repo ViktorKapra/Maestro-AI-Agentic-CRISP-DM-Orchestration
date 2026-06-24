@@ -22,9 +22,10 @@ from maads.observability.render.timeline import render_timeline
 from maads.observability.schema import TraceEvent, TraceRun
 from maads.flow.crisp_dm_flow import CrispDMFlow
 from maads.state import CrispDMState
+from maads.paths import repo_root
 from maads.testing.fake_llm import fake_llm_response
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = repo_root()
 
 
 @pytest.fixture(autouse=True)

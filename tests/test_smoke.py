@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from maads.paths import repo_root
 from maads.config import load_case_config
 from maads.data_utils import CASE_SHORTHANDS, download_kaggle_competition
 from maads.prompts import AGENT_PROMPTS
@@ -25,7 +26,7 @@ from maads.state import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = repo_root()
 
 
 def test_all_three_configs_load():
