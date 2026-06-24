@@ -1,7 +1,0 @@
-{
-  // Use the project's virtual environment for running and debugging.
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
-  // Make `import crew_starter` / `import maads` resolve from src/.
-  "python.analysis.extraPaths": ["${workspaceFolder}/src"],
-  "python.envFile": "${workspaceFolder}/.env"
-}
