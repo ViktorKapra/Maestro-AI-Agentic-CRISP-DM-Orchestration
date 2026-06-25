@@ -121,7 +121,7 @@ export interface GraphPayload {
   edges: FlowEdge[];
 }
 
-export type TabId = "overview" | "process" | "state" | "communications" | "architecture" | "timeline" | "knowledge";
+export type TabId = "overview" | "process" | "state" | "communications" | "architecture" | "timeline" | "knowledge" | "framework" | "prompts" | "state_shape" | "loop_logic" | "failure_modes";
 
 export type SubstepStatus = "done" | "active" | "pending" | "skipped";
 export type PhaseStatus = "complete" | "active" | "pending";
