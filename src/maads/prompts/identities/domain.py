@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from maads.output_contracts import schema_hint_for_agent
 from maads.prompts.loader import load_agent_prompts
 from maads.rag import retrieve_for_state
 from maads.state import CrispDMState
@@ -58,44 +59,9 @@ Rules:
   - Do not recommend a final model.
   - Output strict JSON only: no prose, no markdown, no comments."""
 
-DOMAIN_UNDERSTANDING_SCHEMA_HINT = """{
-  "business_objectives": "string",
-  "situation_assessment": {
-    "resources": ["string"],
-    "requirements": ["string"],
-    "assumptions": ["string"],
-    "constraints": ["string"],
-    "risks": ["string"],
-    "terminology": [{"term": "string", "meaning": "string"}],
-    "costs_or_tradeoffs": ["string"],
-    "expected_benefits": ["string"]
-  },
-  "data_mining_goal": "string",
-  "success_criterion": {
-    "metric": "string",
-    "target_value": "string|null",
-    "direction": "maximize|minimize"
-  },
-  "data_description_notes": [
-    {"feature": "string", "meaning": "string"}
-  ],
-  "feature_hints": [
-    {
-      "feature": "string",
-      "rationale": "string",
-      "expected_effect": "positive|negative|nonlinear|unknown"
-    }
-  ],
-  "domain_data_quality_flags": [
-    {"feature": "string", "risk": "string"}
-  ],
-  "loop_a_recommendation": {
-    "should_trigger": true,
-    "reason": "string"
-  },
-  "assumptions": ["string"],
-  "open_questions": ["string"]
-}"""
+# Single source of truth: derived from output_contracts.DomainOutput, exactly as the
+# Data Engineer / Data Scientist / Storyteller hints derive from their own contracts.
+DOMAIN_UNDERSTANDING_SCHEMA_HINT = schema_hint_for_agent("domain")
 
 
 def domain_identity(dataset_name: str) -> dict[str, str]:

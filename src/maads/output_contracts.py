@@ -204,6 +204,13 @@ class DeveloperOutput(BaseModel):
     completion_evidence: DeveloperCompletionEvidence | None = None
 
 
+class DomainTerminology(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    term: str | None = None
+    meaning: str | None = None
+
+
 class DomainSituationAssessment(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -212,17 +219,57 @@ class DomainSituationAssessment(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
+    terminology: list[DomainTerminology] = Field(default_factory=list)
+    costs_or_tradeoffs: list[str] = Field(default_factory=list)
+    expected_benefits: list[str] = Field(default_factory=list)
+
+
+class DomainSuccessCriterion(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    metric: str | None = None
+    target_value: str | None = None
+    direction: Literal["maximize", "minimize"] | None = None
+
+
+class DomainFeatureHint(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    feature: str | None = None
+    rationale: str | None = None
+    expected_effect: Literal["positive", "negative", "nonlinear", "unknown"] | None = None
+
+
+class DomainDataNote(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    feature: str | None = None
+    meaning: str | None = None
+
+
+class DomainQualityFlag(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    feature: str | None = None
+    risk: str | None = None
+
+
+class DomainLoopRecommendation(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    should_trigger: bool | None = None
+    reason: str | None = None
 
 
 class DomainOutput(BaseModel):
     business_objectives: str
     situation_assessment: DomainSituationAssessment
     data_mining_goal: str
-    success_criterion: dict[str, Any]
-    data_description_notes: list[dict[str, Any]] = Field(default_factory=list)
-    feature_hints: list[dict[str, Any]] = Field(default_factory=list)
-    domain_data_quality_flags: list[dict[str, Any]] = Field(default_factory=list)
-    loop_a_recommendation: dict[str, Any]
+    success_criterion: DomainSuccessCriterion
+    data_description_notes: list[DomainDataNote] = Field(default_factory=list)
+    feature_hints: list[DomainFeatureHint] = Field(default_factory=list)
+    domain_data_quality_flags: list[DomainQualityFlag] = Field(default_factory=list)
+    loop_a_recommendation: DomainLoopRecommendation
     assumptions: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
 
