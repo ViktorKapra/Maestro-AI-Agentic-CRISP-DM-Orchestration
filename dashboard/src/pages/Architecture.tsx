@@ -12,12 +12,12 @@ export function Architecture({ caseId }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-surface-border bg-surface-raised p-4">
-        <p className="text-sm text-slate-400 mb-2">
-          Live agent topology and information flow. Read left to right:{" "}
+      <div className="rounded-2xl border border-surface-border bg-surface-raised p-4 glow-card">
+        <p className="text-sm text-slate-400 mb-2 font-medium">
+          🦋 Live agent topology and information flow. Read left to right:{" "}
           <span className="text-slate-300">CrispDM Flow</span> dispatches substeps
-          to agents (gray edges); agents call services such as the LLM (blue edges).
-          Animated blue edges indicate an in-flight LLM call.
+          to agents (gray edges); agents call services such as the LLM. Sparkly
+          animated edges ✨ mean an in-flight LLM call.
         </p>
         <ProgressRail status={status} />
       </div>

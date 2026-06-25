@@ -39,16 +39,16 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
   return (
     <article
       id={`comm-${record.id}`}
-      className={`rounded-lg border p-4 transition-colors ${
+      className={`rounded-2xl border p-4 transition-colors ${
         highlighted
-          ? "border-accent bg-accent/10"
+          ? "border-accent bg-accent/10 glow-card"
           : "border-surface-border bg-surface-raised"
       }`}
     >
       <header className="flex flex-wrap items-center gap-2 mb-2">
-        <span className="font-mono text-xs text-accent-muted">{record.id}</span>
-        <span className="rounded bg-surface-border px-2 py-0.5 text-xs">
-          {record.agent_name || record.role || "agent"}
+        <span className="font-mono text-xs text-accent-muted font-semibold">{record.id}</span>
+        <span className="rounded-full bg-surface-border px-2 py-0.5 text-xs font-semibold">
+          🤖 {record.agent_name || record.role || "agent"}
         </span>
         {record.model && (
           <span className="text-xs text-slate-500">{record.model}</span>
@@ -57,13 +57,13 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
           <span className="text-xs text-slate-500">§{record.substep}</span>
         )}
         {failed && (
-          <span className="rounded bg-red-900/50 text-red-300 px-2 py-0.5 text-xs">
-            {schemaOnlyFailure ? "schema failed" : "parse failed"}
+          <span className="rounded-full bg-rose-100 text-rose-700 border border-rose-300 px-2 py-0.5 text-xs font-semibold">
+            😵 {schemaOnlyFailure ? "schema failed" : "parse failed"}
           </span>
         )}
         {!record.closed && (
-          <span className="rounded bg-green-900/40 text-green-300 px-2 py-0.5 text-xs">
-            in flight
+          <span className="rounded-full bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-300 px-2 py-0.5 text-xs font-semibold">
+            ✨ in flight
           </span>
         )}
       </header>
@@ -85,9 +85,9 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
           setExpanded(!expanded);
           onSelect?.(record.id);
         }}
-        className="text-sm text-accent-muted hover:text-accent"
+        className="text-sm font-semibold text-accent-muted hover:text-accent"
       >
-        {expanded ? "Hide transcript" : "Show transcript"}
+        {expanded ? "🙈 Hide transcript" : "👀 Show transcript"}
       </button>
 
       {expanded && (

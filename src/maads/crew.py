@@ -146,8 +146,18 @@ def _try_parse_json(text: str) -> dict | None:
 
 
 def _extract_json(text: str) -> dict | None:
-    """Parse JSON, cleaning up common LLM formatting before retrying."""
+    """Parse JSON, cleaning up common LLM formatting before retrying.
+
+    Reasoning models (e.g. minimax-m3) prepend a ``<think>...</think>`` block whose
+    prose contains braces, which would otherwise derail the balanced-object search
+    below. Strip such blocks first so only the real answer is parsed.
+    """
     if not text or not str(text).strip():
+        return None
+
+    text = re.sub(r"<think(?:ing)?>.*?</think(?:ing)?>", "", str(text),
+                  flags=re.DOTALL | re.IGNORECASE).strip()
+    if not text:
         return None
 
     stripped = _strip_markdown_wrappers(str(text))

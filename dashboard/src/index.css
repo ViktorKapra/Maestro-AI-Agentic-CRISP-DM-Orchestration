@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,19 +7,49 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: "Quicksand", ui-rounded, system-ui, -apple-system, sans-serif;
+  color: #3b1f47;
+  /* 🌸 soft lavender → rose dreamy gradient */
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #f3e8ff 0%, transparent 60%),
+    radial-gradient(1000px 500px at 110% 10%, #ffe4ef 0%, transparent 55%),
+    linear-gradient(160deg, #faf0ff 0%, #fff0f6 100%);
+  background-attachment: fixed;
 }
 
 @keyframes pulse-ring {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
+    box-shadow: 0 0 0 0 rgba(217, 70, 239, 0.45);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+    box-shadow: 0 0 0 7px rgba(217, 70, 239, 0);
   }
 }
 
 .node-active {
   animation: pulse-ring 2s ease-in-out infinite;
+}
+
+/* 💅 cute pastel scrollbars */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: #fbe9f5;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #e9a8d6;
+  border-radius: 999px;
+  border: 2px solid #fbe9f5;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #d6409f;
+}
+
+/* ✨ soft pink glow on cards */
+.glow-card {
+  box-shadow: 0 8px 30px -12px rgba(214, 64, 159, 0.35);
 }
