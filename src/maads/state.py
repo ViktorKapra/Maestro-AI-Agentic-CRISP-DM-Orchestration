@@ -13,8 +13,8 @@ Two design rules:
 
 When reading or writing state inside an agent prompt, use the
 `view_for(agent_name)` helper at the bottom of this file. Sending the
-entire state to every LLM call burns the token budget — see
-docs/TOKEN_BUDGET.md.
+entire state to every LLM call burns the token budget — use
+`view_for(agent_name)` instead (see its docstring below).
 """
 from __future__ import annotations
 
@@ -68,8 +68,8 @@ SUBSTEP_NAMES: dict[str, str] = {
     "5.1": "Evaluate Results",
     "5.2": "Review Process",
     "5.3": "Determine Next Steps",
-    "6.1": "Plan Deployment",
-    "6.2": "Plan Monitoring and Maintenance",
+    "6.1": "Build Submission",
+    "6.2": "Generate Report Evidence",
     "6.3": "Produce Final Report",
     "6.4": "Review Project",
 }
@@ -90,9 +90,9 @@ SUBSTEP_OWNER: dict[str, str] = {
     "4.3": "data_scientist", "4.4": "data_scientist",
     # Phase 5 — Evaluation
     "5.1": "data_scientist", "5.2": "pm", "5.3": "pm",
-    # Phase 6 — Deployment
-    "6.1": "developer", "6.2": "developer",
-    "6.3": "developer", "6.4": "developer",
+    # Phase 6 — Reporting
+    "6.1": "developer", "6.2": "storyteller",
+    "6.3": "storyteller", "6.4": "developer",
 }
 
 
@@ -114,14 +114,26 @@ class LoopEvent(BaseModel):
     reason: str
 
 
+class EvaluationBundle(BaseModel):
+    problem_type: str
+    metrics: dict[str, float] = Field(default_factory=dict)
+    confusion_matrix: list[list[int]] | None = None
+    class_labels: dict[str, str] = Field(default_factory=dict)
+    cv: dict[str, Any] | None = None
+    figures: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ModelRun(BaseModel):
     technique: str
     parameter_settings: dict[str, Any] = Field(default_factory=dict)
     description: str = ""
     cv_score: float | None = None
+    cv_std: float | None = None
     holdout_score: float | None = None
     assessment: str | None = None
     revised_parameter_settings: dict[str, Any] | None = None
+    evaluation_bundle: EvaluationBundle | None = None
 
 
 # ── Phase 1 — Business Understanding ───────────────────────────────────────
@@ -193,7 +205,9 @@ class Evaluation(BaseModel):
 
 class Deployment(BaseModel):
     deployment_plan: str | None = None                          # 6.1
-    monitoring_and_maintenance_plan: str | None = None          # 6.2
+    monitoring_and_maintenance_plan: str | None = None          # legacy
+    story_spec_path: str | None = None                          # 6.2
+    figures_dir: str | None = None                              # 6.2
     final_report_path: str | None = None                        # 6.3
     final_presentation_path: str | None = None                  # 6.3
     experience_documentation: str | None = None                 # 6.4
@@ -212,6 +226,8 @@ class CrispDMState(BaseModel):
     # Deficits found by a state-artifact validator at the last phase transition;
     # a non-empty list is a Loop B signal the PM reads via view_for("pm").
     validator_findings: list[str] = Field(default_factory=list)
+    # Append-only signals when authored code fell back to baseline (Loop B trigger).
+    degraded_flags: list[str] = Field(default_factory=list)
     halted: bool = False
     halt_reason: str | None = None
 
@@ -224,6 +240,7 @@ class CrispDMState(BaseModel):
 
     log: list[LogEntry] = Field(default_factory=list)
     token_spend: dict[str, int] = Field(default_factory=dict)
+    token_spend_by_provider: dict[str, int] = Field(default_factory=dict)
 
     @classmethod
     def from_config(cls, config: CaseConfig) -> "CrispDMState":
@@ -242,8 +259,16 @@ class CrispDMState(BaseModel):
             label=label, from_phase=from_phase, to_phase=to_phase, reason=reason
         ))
 
-    def add_tokens(self, agent: str, n_tokens: int) -> None:
+    def add_tokens(self, agent: str, n_tokens: int, *, provider: str = "unknown") -> None:
         self.token_spend[agent] = self.token_spend.get(agent, 0) + n_tokens
+        self.token_spend_by_provider[provider] = (
+            self.token_spend_by_provider.get(provider, 0) + n_tokens
+        )
+
+    def record_degraded(self, flag: str) -> None:
+        """Append a degraded-run signal for the PM (Loop B)."""
+        if flag and flag not in self.degraded_flags:
+            self.degraded_flags.append(flag)
 
     # ── Prerequisite checks the orchestrator uses ─────────────────────────
 
@@ -269,11 +294,63 @@ class CrispDMState(BaseModel):
             return False
         if substep == "6.1" and self.md.chosen_model is None:
             return False
-        if substep == "6.3" and self.dep.submission_path is None:
+        if substep == "6.2":
+            cm = self.md.chosen_model
+            if cm is None or cm.evaluation_bundle is None:
+                return False
+        if substep == "6.3" and self.dep.story_spec_path is None:
             return False
         return True
 
-    # ── Token-economy views (see docs/TOKEN_BUDGET.md) ────────────────────
+    # ── Token-economy views (see view_for docstring) ──────────────────────
+
+    def _suggested_pm_action(self) -> dict[str, Any] | None:
+        """Deterministic loop hint for the PM at decision substeps (advisory)."""
+        sub = self.substep
+        if sub == "3.1":
+            blockers = _quality_blockers(self.du.data_quality_report)
+            if blockers:
+                return {
+                    "action": "loop_back",
+                    "loop_label": "A",
+                    "loop_to_phase": 1,
+                    "target_substep": "1.3",
+                    "reason": f"quality blockers present: {blockers[:3]}",
+                }
+        if sub == "5.1":
+            if self.validator_findings:
+                return {
+                    "action": "loop_back",
+                    "loop_label": "B",
+                    "loop_to_phase": 3,
+                    "target_substep": "3.2",
+                    "reason": f"validator findings: {self.validator_findings[:3]}",
+                }
+            if self.degraded_flags:
+                return {
+                    "action": "loop_back",
+                    "loop_label": "B",
+                    "loop_to_phase": 3,
+                    "target_substep": "3.2",
+                    "reason": f"degraded runs: {self.degraded_flags[:3]}",
+                }
+        if sub == "5.2":
+            assessment = self.ev.assessment_of_dm_results or {}
+            if assessment and not assessment.get("meets"):
+                loop_a_count = sum(1 for le in self.loop_history if le.label == "A")
+                if loop_a_count >= 2:
+                    return {
+                        "action": "halt",
+                        "reason": "business goal not met and Loop A already fired twice",
+                    }
+                return {
+                    "action": "loop_back",
+                    "loop_label": "C",
+                    "loop_to_phase": 1,
+                    "target_substep": "1.3",
+                    "reason": "business success criteria not met",
+                }
+        return None
 
     def view_for(self, agent_name: str) -> dict[str, Any]:
         """Minimal slice of state to send to an agent's prompt.
@@ -300,8 +377,20 @@ class CrispDMState(BaseModel):
             base["latest_model_assessment"] = _latest_model_assessment(self.md)
             base["outputs_status"] = _pm_outputs_status(self)
             base["validator_findings"] = list(self.validator_findings)
-            assessment = self.ev.assessment_of_dm_results or {}
-            base["business_goal_met"] = bool(assessment.get("meets"))
+            base["degraded_flags"] = list(self.degraded_flags)
+            base["suggested_action"] = self._suggested_pm_action()
+            assessment = self.ev.assessment_of_dm_results
+            if assessment is None:
+                if self.substep in {"5.1"}:
+                    base["business_goal_met"] = None
+                else:
+                    cv = self.md.chosen_model.cv_score if self.md.chosen_model else None
+                    thr = self.config.success_criterion.threshold
+                    base["business_goal_met"] = (
+                        bool(cv is not None and cv >= thr) if cv is not None else None
+                    )
+            else:
+                base["business_goal_met"] = bool(assessment.get("meets"))
         elif agent_name == "domain":
             base["bu"] = self.bu.model_dump(exclude_none=True)
             base["du_so_far"] = self.du.model_dump(exclude_none=True)
@@ -324,6 +413,24 @@ class CrispDMState(BaseModel):
             base["dataset"] = self.dp.dataset
             base["sample_submission_csv"] = self.config.data.sample_submission_csv
             base["data_description_report"] = self.du.data_description_report
+        elif agent_name == "storyteller":
+            cm = self.md.chosen_model
+            base["chosen_model"] = cm.model_dump() if cm else None
+            base["evaluation_bundle"] = (
+                cm.evaluation_bundle.model_dump()
+                if cm and cm.evaluation_bundle
+                else None
+            )
+            base["business_objectives"] = self.bu.business_objectives
+            base["data_mining_goals"] = self.bu.data_mining_goals
+            base["data_description_report"] = self.du.data_description_report
+            base["data_exploration_report"] = self.du.data_exploration_report
+            base["test_design"] = self.md.test_design
+            base["assessment_of_dm_results"] = self.ev.assessment_of_dm_results
+            base["loop_history"] = [le.model_dump() for le in self.loop_history]
+            base["degraded_flags"] = list(self.degraded_flags)
+            base["class_labels"] = dict(self.config.class_labels)
+            base["submission_path"] = self.dep.submission_path
         return base
 
 

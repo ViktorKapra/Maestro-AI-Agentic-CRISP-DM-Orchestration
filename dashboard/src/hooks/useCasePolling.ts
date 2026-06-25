@@ -4,6 +4,10 @@ import {
   fetchCommunications,
   fetchCommunicationsSummary,
   fetchGraph,
+  fetchLiveSummary,
+  fetchProcess,
+  fetchRag,
+  fetchState,
   fetchStatus,
   fetchTraceSummary,
 } from "../shared/api";
@@ -19,6 +23,15 @@ export function useCases() {
   return useQuery({
     queryKey: ["cases"],
     queryFn: fetchCases,
+    ...pollOptions,
+  });
+}
+
+export function useLiveSummary(caseId: string | null) {
+  return useQuery({
+    queryKey: ["liveSummary", caseId],
+    queryFn: () => fetchLiveSummary(caseId!),
+    enabled: !!caseId,
     ...pollOptions,
   });
 }
@@ -41,10 +54,13 @@ export function useTraceSummary(caseId: string | null) {
   });
 }
 
-export function useCommunications(caseId: string | null) {
+export function useCommunications(
+  caseId: string | null,
+  opts?: { sinceId?: string; limit?: number },
+) {
   return useQuery({
-    queryKey: ["communications", caseId],
-    queryFn: () => fetchCommunications(caseId!),
+    queryKey: ["communications", caseId, opts?.sinceId, opts?.limit],
+    queryFn: () => fetchCommunications(caseId!, opts),
     enabled: !!caseId,
     ...pollOptions,
   });
@@ -63,6 +79,33 @@ export function useGraph(caseId: string | null) {
   return useQuery({
     queryKey: ["graph", caseId],
     queryFn: () => fetchGraph(caseId!),
+    enabled: !!caseId,
+    ...pollOptions,
+  });
+}
+
+export function useProcess(caseId: string | null) {
+  return useQuery({
+    queryKey: ["process", caseId],
+    queryFn: () => fetchProcess(caseId!),
+    enabled: !!caseId,
+    ...pollOptions,
+  });
+}
+
+export function useCrispDMState(caseId: string | null) {
+  return useQuery({
+    queryKey: ["crispdmState", caseId],
+    queryFn: () => fetchState(caseId!),
+    enabled: !!caseId,
+    ...pollOptions,
+  });
+}
+
+export function useRag(caseId: string | null) {
+  return useQuery({
+    queryKey: ["rag", caseId],
+    queryFn: () => fetchRag(caseId!),
     enabled: !!caseId,
     ...pollOptions,
   });

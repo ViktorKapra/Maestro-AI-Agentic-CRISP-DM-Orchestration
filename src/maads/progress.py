@@ -55,16 +55,21 @@ def start_run(case_id: str, *, quiet: bool = False) -> None:
     _active.start()
 
 
-def stop_run(halt_reason: str | None = None) -> None:
+def stop_run(halt_reason: str | None = None, *, ml_success: bool | None = None) -> None:
     global _active
     if halt_reason:
-        prefix = "Interrupted" if "interrupt" in halt_reason.lower() else "Complete"
+        if "interrupt" in halt_reason.lower():
+            prefix = "Interrupted"
+        elif ml_success is False or "without ML success" in halt_reason:
+            prefix = "Finished"
+        else:
+            prefix = "Complete"
         set_activity(f"{prefix} · {halt_reason}")
     elif _active is None:
         set_activity("Complete")
     if _active is None:
         return
-    _active.stop(halt_reason)
+    _active.stop(halt_reason, ml_success=ml_success)
     _active = None
 
 
@@ -254,7 +259,7 @@ class RunProgress:
                 ),
             )
 
-    def stop(self, halt_reason: str | None) -> None:
+    def stop(self, halt_reason: str | None, *, ml_success: bool | None = None) -> None:
         if self._pipeline_task is not None:
             self._progress.update(
                 self._pipeline_task,
@@ -262,11 +267,14 @@ class RunProgress:
             )
         if self._activity_task is not None:
             reason = halt_reason or "finished"
-            label = (
-                "[bold yellow]Interrupted[/]"
-                if halt_reason and "interrupt" in halt_reason.lower()
-                else "[bold green]Complete[/]"
-            )
+            if halt_reason and "interrupt" in halt_reason.lower():
+                label = "[bold yellow]Interrupted[/]"
+            elif ml_success is False or (
+                halt_reason and "without ML success" in halt_reason
+            ):
+                label = "[bold yellow]Finished[/]"
+            else:
+                label = "[bold green]Complete[/]"
             self._progress.update(
                 self._activity_task,
                 description=f"{label} · {reason}",

@@ -1,0 +1,41 @@
+task_1_1:
+  description: >
+    CRISP-DM substep 1.1 (Determine Business Objectives).
+
+    {instruction}
+
+    Relevant state (JSON):
+
+    {state_view}
+
+    Respond ONLY with JSON matching: {schema_hint}
+  expected_output: A single JSON object, no prose, no Markdown fences.
+  agent: domain
+
+task_1_2:
+  description: >
+    CRISP-DM substep 1.2 (Assess Situation).
+
+    {instruction}
+
+    Relevant state (JSON):
+
+    {state_view}
+
+    Respond ONLY with JSON matching: {schema_hint}
+  expected_output: A single JSON object, no prose, no Markdown fences.
+  agent: domain
+
+task_1_3:
+  description: >
+    CRISP-DM substep 1.3 (Determine Data Mining Goals).
+
+    {instruction}
+
+    Relevant state (JSON):
+
+    {state_view}
+
+    Respond ONLY with JSON matching: {schema_hint}
+  expected_output: A single JSON object, no prose, no Markdown fences.
+  agent: domain

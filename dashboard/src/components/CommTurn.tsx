@@ -21,7 +21,12 @@ function extractText(value: unknown): string {
 export function CommTurn({ record, highlighted, onSelect }: Props) {
   const [expanded, setExpanded] = useState(false);
   const parseOk = record.outcome?.parse_ok;
+  const jsonValid = record.outcome?.json_valid;
+  const schemaOk = record.outcome?.schema_ok;
+  const schemaErrors = record.outcome?.schema_errors;
   const failed = parseOk === false;
+  const schemaOnlyFailure =
+    jsonValid === true && schemaOk === false;
 
   const messages = record.provider?.messages;
   const response =
@@ -53,7 +58,7 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
         )}
         {failed && (
           <span className="rounded-full bg-rose-100 text-rose-700 border border-rose-300 px-2 py-0.5 text-xs font-semibold">
-            😵 parse failed
+            😵 {schemaOnlyFailure ? "schema failed" : "parse failed"}
           </span>
         )}
         {!record.closed && (
@@ -121,6 +126,11 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
           )}
           {record.outcome?.error && (
             <p className="text-red-400 text-xs">{record.outcome.error}</p>
+          )}
+          {schemaOnlyFailure && schemaErrors && schemaErrors.length > 0 && (
+            <p className="text-amber-400 text-xs">
+              Schema: {schemaErrors.slice(0, 3).join("; ")}
+            </p>
           )}
         </div>
       )}

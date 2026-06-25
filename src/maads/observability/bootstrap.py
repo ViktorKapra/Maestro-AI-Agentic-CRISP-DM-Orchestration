@@ -21,6 +21,21 @@ def is_enabled() -> bool:
     return os.getenv("MAADS_TRACE", "1").lower() not in {"0", "false", "no", "off"}
 
 
+def configure_crewai_runtime() -> None:
+    """Tune CrewAI env before any crew imports run.
+
+    MAADS persists traces under ``artifacts/<case>/runs/<run_id>/trace/`` via
+    ``MAADS_TRACE``. CrewAI's optional cloud tracing (``CREWAI_TRACING_ENABLED``)
+    uploads to app.crewai.com and fails offline or without a linked project
+    (404 EphemeralTraceBatch). Disable it unless explicitly opted in.
+    """
+    if os.getenv("MAADS_CREWAI_CLOUD_TRACING", "").lower() not in {
+        "1", "true", "yes", "on",
+    }:
+        os.environ["CREWAI_TRACING_ENABLED"] = "false"
+    os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+
+
 def auto_enable() -> None:
     """Install tracing hooks once per process (no-op when MAADS_TRACE=0)."""
     global _enabled, _patched
@@ -40,15 +55,21 @@ def auto_enable() -> None:
     atexit.register(_flush_on_exit)
 
 
-def begin_run(case_id: str | None, artifact_dir: Path) -> None:
+def begin_run(
+    case_id: str | None,
+    artifact_dir: Path,
+    *,
+    run_id: str | None = None,
+) -> str:
     if not is_enabled():
-        return
+        return run_id or ""
     coll = get_collector()
-    coll.start_run(case_id)
+    run_id = coll.start_run(case_id, run_id=run_id)
     ctx.current_case_id.set(case_id)
     trace_dir = artifact_dir / "trace"
     ctx.export_dir.set(trace_dir)
     flush_trace(trace_dir)
+    return run_id
 
 
 def flush_trace(trace_dir: Path | None = None) -> Path | None:

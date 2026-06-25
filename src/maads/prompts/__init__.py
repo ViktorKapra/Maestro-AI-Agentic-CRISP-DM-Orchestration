@@ -1,55 +1,25 @@
-"""Per-agent prompts embedded as Python constants."""
+"""Per-agent prompts loaded from config YAML + markdown backstories."""
 from __future__ import annotations
 
-from maads.prompts.identities.data_engineer import (
-    DE_BACKSTORY,
-    DE_GOAL,
-    DE_ROLE,
-    format_data_engineer_task,
-)
-from maads.prompts.identities.data_scientist import (
-    DS_BACKSTORY,
-    DS_GOAL,
-    DS_ROLE,
-    format_data_scientist_task,
-)
-from maads.prompts.identities.domain import (
-    DOMAIN_BACKSTORY,
-    DOMAIN_GOAL,
-    DOMAIN_ROLE_TEMPLATE,
-    format_domain_understanding_task,
-)
-from maads.prompts.identities.pm import PM_BACKSTORY, PM_GOAL, PM_ROLE
+from maads.prompts.loader import load_agent_prompts, task_scaffold
+from maads.prompts.identities.data_engineer import format_data_engineer_task
+from maads.prompts.identities.data_scientist import format_data_scientist_task
+from maads.prompts.identities.domain import format_domain_understanding_task
+from maads.prompts.identities.developer import format_developer_task
+from maads.prompts.identities.storyteller import format_storyteller_task
 
-AGENT_PROMPTS: dict[str, dict[str, str]] = {
-    "pm": {"role": PM_ROLE, "goal": PM_GOAL, "backstory": PM_BACKSTORY},
-    "domain": {
-        "role": DOMAIN_ROLE_TEMPLATE,
-        "goal": DOMAIN_GOAL,
-        "backstory": DOMAIN_BACKSTORY,
-    },
-    "data_engineer": {
-        "role": DE_ROLE,
-        "goal": DE_GOAL,
-        "backstory": DE_BACKSTORY,
-    },
-    "data_scientist": {
-        "role": DS_ROLE,
-        "goal": DS_GOAL,
-        "backstory": DS_BACKSTORY,
-    },
-    "developer": {
-        "role": "Developer & On-call Debugger",
-        "goal": (
-            "Produce the deployment artefacts (a valid submission.csv) and fix "
-            "broken code for the other agents."
-        ),
-        "backstory": (
-            "You keep the crew from drowning in its own errors: diagnose first, "
-            "propose the smallest fix, validate the submission schema before writing."
-        ),
-    },
-}
+JSON_TERMINATION_INSTRUCTION = (
+    "Return the raw JSON payload matching the target schema. "
+    "Your response must begin with '{' and end with '}'. "
+    "Do not include markdown wraps."
+)
+
+JSON_EXPECTED_OUTPUT = (
+    "A single JSON object, no prose, no Markdown fences. "
+    "Response must begin with '{' and end with '}'."
+)
+
+AGENT_PROMPTS: dict[str, dict[str, str]] = load_agent_prompts()
 
 AGENT_TASK_TEMPLATES: dict[str, str] = {
     "pm": "state_only",
@@ -57,20 +27,43 @@ AGENT_TASK_TEMPLATES: dict[str, str] = {
     "data_engineer": "substep_json",
     "data_scientist": "substep_json",
     "developer": "substep_json",
+    "storyteller": "substep_json",
 }
 
-STATE_ONLY_TASK_TEMPLATE = (
-    "Current CRISP-DM state (JSON):\n{state_view}\n\n{instruction}"
+STATE_ONLY_TASK_TEMPLATE = task_scaffold("state_only")["description"]
+
+TASK_TEMPLATE = task_scaffold("substep_json")["description"]
+
+PM_REVIEW_INSTRUCTION = (
+    "Produce an honest CRISP-DM 5.2 process review as JSON with key "
+    '"review_of_process" (string). Reference loop_history, degraded_flags, '
+    "and which phases produced weak outputs."
 )
 
-TASK_TEMPLATE = (
-    "CRISP-DM substep {substep} ({substep_name}).\n"
-    "{instruction}\n\n"
-    "Relevant state (JSON):\n{state_view}\n\n"
-    "Respond ONLY with JSON matching: {schema_hint}"
+PM_NEXT_STEPS_INSTRUCTION = (
+    "Produce CRISP-DM 5.3 next steps as JSON with keys: "
+    '"list_of_possible_actions" (list of strings) and "decision" (string: '
+    'deploy|loop_c|halt). Ground the decision in assessment_of_dm_results.'
 )
 
 PM_DECISION_INSTRUCTION = (
     "Review the state view below and issue exactly one directive JSON object "
     "as specified in your instructions."
 )
+
+__all__ = [
+    "AGENT_PROMPTS",
+    "AGENT_TASK_TEMPLATES",
+    "JSON_EXPECTED_OUTPUT",
+    "JSON_TERMINATION_INSTRUCTION",
+    "STATE_ONLY_TASK_TEMPLATE",
+    "TASK_TEMPLATE",
+    "PM_DECISION_INSTRUCTION",
+    "PM_REVIEW_INSTRUCTION",
+    "PM_NEXT_STEPS_INSTRUCTION",
+    "format_data_engineer_task",
+    "format_data_scientist_task",
+    "format_domain_understanding_task",
+    "format_developer_task",
+    "format_storyteller_task",
+]

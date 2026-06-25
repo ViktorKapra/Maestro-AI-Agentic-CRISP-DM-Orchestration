@@ -58,7 +58,18 @@ def run_dashboard(
 ) -> None:
     """Start uvicorn and optionally open the browser."""
     global _artifact_root
-    _artifact_root = artifact_dir
+    _artifact_root = artifact_dir.resolve()
+
+    from maads.dashboard import store
+
+    cases = store.list_cases(_artifact_root)
+    print(f"Cases found: {len(cases)} ({', '.join(c['case_id'] for c in cases) or 'none'})")
+    if not cases:
+        print(
+            "WARNING: no runs with status.json under artifact root. "
+            "Start a pipeline run first, or pass --artifact-dir to the directory "
+            "that contains per-case folders (e.g. artifacts/).",
+        )
 
     app = create_app(static_dir=static_dir)
 

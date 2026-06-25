@@ -21,11 +21,24 @@ const STATE_STYLES: Record<string, string> = {
   error: "border-status-halted bg-rose-100",
 };
 
+function FlowNode({ data }: NodeProps) {
+  const state = (data.state as string) ?? "idle";
+  return (
+    <div
+      className={`rounded-xl border-2 px-5 py-3 min-w-[140px] text-center shadow-lg border-accent/70 bg-accent/10 ${STATE_STYLES[state] ?? STATE_STYLES.idle}`}
+    >
+      <Handle type="source" position={Position.Right} className="!bg-accent" />
+      <div className="text-sm font-semibold tracking-tight">{data.label as string}</div>
+      <div className="text-xs text-slate-400 capitalize">{state}</div>
+    </div>
+  );
+}
+
 function AgentNode({ data }: NodeProps) {
   const state = (data.state as string) ?? "idle";
   return (
     <div
-      className={`rounded-lg border-2 px-4 py-2 min-w-[120px] text-center shadow-lg ${STATE_STYLES[state] ?? STATE_STYLES.idle}`}
+      className={`rounded-lg border-2 px-4 py-2 min-w-[130px] text-center shadow-lg ${STATE_STYLES[state] ?? STATE_STYLES.idle}`}
     >
       <Handle type="target" position={Position.Left} className="!bg-accent" />
       <div className="text-sm font-medium">{data.label as string}</div>
@@ -39,16 +52,16 @@ function ServiceNode({ data }: NodeProps) {
   const state = (data.state as string) ?? "idle";
   return (
     <div
-      className={`rounded-full border-2 px-5 py-3 min-w-[80px] text-center ${STATE_STYLES[state] ?? STATE_STYLES.idle}`}
+      className={`rounded-full border-2 px-5 py-3 min-w-[88px] text-center ${STATE_STYLES[state] ?? STATE_STYLES.idle}`}
     >
       <Handle type="target" position={Position.Left} className="!bg-accent" />
       <div className="text-sm font-medium">{data.label as string}</div>
-      <Handle type="source" position={Position.Right} className="!bg-accent" />
     </div>
   );
 }
 
 const nodeTypes = {
+  flowNode: FlowNode,
   agentNode: AgentNode,
   serviceNode: ServiceNode,
 };
@@ -65,28 +78,35 @@ export function FlowCanvas({ graph }: Props) {
         type: n.type,
         position: n.position,
         data: n.data,
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
       })),
     [graph],
   );
 
   const edges: Edge[] = useMemo(
     () =>
-      (graph?.edges ?? []).map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        animated: e.animated,
-        style: {
-          stroke: e.edgeType === "dispatch" ? "#e9a8d6" : "#d6409f",
-          strokeWidth: e.animated ? 2.5 : 1.5,
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: e.animated ? "#d6409f" : "#e9a8d6",
-        },
-        label: e.communication_id ?? undefined,
-        labelStyle: { fill: "#a98fb8", fontSize: 10 },
-      })),
+      (graph?.edges ?? []).map((e) => {
+        const isDispatch = e.edgeType === "dispatch";
+        const stroke = isDispatch ? "#e9a8d6" : "#d6409f";
+        return {
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          type: isDispatch ? "smoothstep" : "default",
+          animated: e.animated,
+          style: {
+            stroke,
+            strokeWidth: e.animated ? 2.5 : isDispatch ? 2 : 1.5,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: e.animated ? "#d6409f" : stroke,
+          },
+          label: e.communication_id ?? undefined,
+          labelStyle: { fill: "#a98fb8", fontSize: 10 },
+        };
+      }),
     [graph],
   );
 
@@ -99,21 +119,23 @@ export function FlowCanvas({ graph }: Props) {
   }
 
   return (
-    <div className="h-[520px] rounded-2xl border border-surface-border overflow-hidden glow-card">
+    <div className="h-[560px] rounded-2xl border border-surface-border overflow-hidden glow-card">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
+        fitViewOptions={{ padding: 0.2 }}
         colorMode="light"
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#f0abdc" gap={20} />
         <Controls />
         <MiniMap
-          nodeColor={(n) =>
-            n.data?.state === "active" ? "#d946ef" : "#e9a8d6"
-          }
+          nodeColor={(n) => {
+            if (n.type === "flowNode") return "#a855f7";
+            return n.data?.state === "active" ? "#d946ef" : "#e9a8d6";
+          }}
           maskColor="rgba(253, 244, 255, 0.7)"
         />
       </ReactFlow>

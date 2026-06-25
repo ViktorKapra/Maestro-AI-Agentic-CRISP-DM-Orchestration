@@ -59,10 +59,11 @@ def _agent_role(agent: Any) -> str:
 
 def _safe_attrs(event: Any, **extra: Any) -> dict[str, Any]:
     attrs = dict(extra)
-    maads = ctx.current_maads_agent.get()
-    crew_role = agent_role_from_crew(event) or getattr(event, "agent_role", None)
-    crew_maads = maads_id_for_role(crew_role) if crew_role else None
-    agent_id = maads or crew_maads
+    ctx_maads = ctx.current_maads_agent.get()
+    crew_role = extra.get("role") or agent_role_from_crew(event) or getattr(event, "agent_role", None)
+    crew_maads = maads_id_for_role(str(crew_role)) if crew_role else None
+    # Executing CrewAI agent wins over orchestrator substep owner (e.g. Developer DEBUG).
+    agent_id = crew_maads or ctx_maads
     attrs["substep"] = ctx.current_substep.get()
     attrs["maads_agent"] = agent_id
     if agent_id:

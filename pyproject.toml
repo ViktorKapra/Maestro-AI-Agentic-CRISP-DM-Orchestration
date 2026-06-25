@@ -13,10 +13,12 @@ dependencies = [
     # framework (>=1.10.1 required by openinference-instrumentation-crewai)
     "crewai>=1.10.1,<2.0",
     "crewai-tools>=1.10.1,<2.0",
+    "ollama>=0.4",  # CrewAI Knowledge embeddings when EMBEDDINGS_PROVIDER=ollama
     # ML stack (Phase 1 fixed-baseline modeling)
     "pandas>=2.1",
     "scikit-learn>=1.4",
     "pyarrow>=15.0",
+    "matplotlib>=3.8",
     # data
     "kaggle>=1.6",
     # observability
@@ -29,6 +31,8 @@ dependencies = [
 dev = ["pytest>=7.4", "coverage>=7.4"]
 dashboard = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
 
+[project.scripts]
+maads = "maads.__main__:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -39,12 +43,19 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 include = ["maads*"]
 
+# Ship the agent/task config and backstory prompts as package data (loaded via
+# importlib.resources, so they must be present in installed wheels too).
+[tool.setuptools.package-data]
+maads = ["config/*.yaml", "prompts/identities/backstories/*.md", "crews/**/config/tasks.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
 [tool.coverage.run]
 source = ["maads"]
 omit = [
-    "*/test_*",
     "*/testing/*",
-    "*/observability/test_*",
 ]
 
 [tool.coverage.report]

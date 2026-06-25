@@ -1,0 +1,27 @@
+"""Shared helpers for phase-crew substep kickoffs."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from maads.state import CrispDMState
+
+
+def kickoff_json(
+    agent_name: str,
+    instruction: str,
+    state: CrispDMState,
+    schema_hint: str = "",
+    *,
+    artifact_dir: Path | None = None,
+) -> dict | None:
+    """Run one JSON task for a phase crew substep."""
+    from maads.agents import run_json_task
+
+    return run_json_task(
+        agent_name,
+        instruction,
+        state,
+        schema_hint=schema_hint,
+        artifact_dir=artifact_dir,
+    )
+

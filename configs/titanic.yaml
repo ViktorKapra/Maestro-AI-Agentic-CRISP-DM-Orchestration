@@ -25,6 +25,10 @@ feature_hints:
   text_free: [Name, Ticket, Cabin]
   high_missing: [Cabin]
 
+class_labels:
+  "0": "Not survived"
+  "1": "Survived"
+
 # Business success criterion — used by Evaluation phase.
 success_criterion:
   metric: accuracy

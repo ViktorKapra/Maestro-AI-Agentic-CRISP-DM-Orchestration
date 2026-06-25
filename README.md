@@ -6,7 +6,7 @@ process model. The **Project Manager** orchestrates each turn; specialist agents
 powers LLM calls; a typed shared state (`CrispDMState`) and trace tooling make
 runs observable.
 
-See [`docs/plan.md`](docs/plan.md) for the canonical roadmap and audit notes.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the Flow graph and module layout.
 
 ## Project layout
 
@@ -14,11 +14,14 @@ See [`docs/plan.md`](docs/plan.md) for the canonical roadmap and audit notes.
 configs/                  Case YAML files (titanic, house_prices, disaster_tweets)
 data/                     Downloaded competition CSVs
 artifacts/<case>/         Per-run outputs (submission, trace, final_state.json)
-src/maads/                Installable Python package
-  orchestrator.py         CRISP-DM state machine
+src/maads/                Installable Python package (src layout)
+  config/                 Canonical agents.yaml + tasks.yaml (CrewAI)
+  flow/                   CrewAI Flow orchestration (CrispDMFlow)
+  crews/                  Phase-scoped @CrewBase crews (per-phase tasks.yaml)
   agents.py               Five agent wrappers
   crew.py                 CrewAI LLM seam
   observability/          Trace export (timeline, narrative, diagrams)
+tests/                    Pytest suite (outside the installable package)
 ```
 
 ## Setup
@@ -45,6 +48,14 @@ python -m maads data download --case titanic
 
 ```bash
 python -m maads run --case titanic
+# or, after install:
+maads run --case titanic
+```
+
+Runs via **CrewAI Flow** (`CrispDMFlow`).
+
+```bash
+python -m maads flow plot
 ```
 
 While running, watch `artifacts/titanic/status.json` or the stderr progress bar.
@@ -78,18 +89,21 @@ cd dashboard && npm install && npm run build
 python -m maads dashboard --case titanic
 ```
 
-The dashboard binds to `127.0.0.1:8765` by default. Communications contain
-full prompts — local use only.
+The dashboard binds to `127.0.0.1:8765` by default. It reads
+`artifacts/<case>/runs/<run_id>/` via the `current` symlink. If the UI shows
+**No cases**, restart the dashboard after `maads run` starts, or check
+`http://127.0.0.1:8765/api/health` for the artifact root and detected cases.
+Communications contain full prompts — local use only.
 
 ## Tests
 
 ```bash
 # Fast path-coverage run (mocked LLM, ~1 min)
-MAADS_TRACE=0 coverage run -m pytest src/maads/test_path_coverage.py -q
+MAADS_TRACE=0 coverage run -m pytest tests/test_path_coverage.py -q
 coverage report --show-missing
 
 # Full test suite
-pytest src/maads/
+pytest
 ```
 
 ## CLI reference

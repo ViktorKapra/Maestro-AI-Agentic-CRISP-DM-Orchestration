@@ -8,7 +8,7 @@ interface Props {
 }
 
 export function Communications({ caseId, highlightCommId }: Props) {
-  const { data: communications } = useCommunications(caseId);
+  const { data: communications } = useCommunications(caseId, { limit: 200 });
   const [selected, setSelected] = useState<string | null>(
     highlightCommId ?? null,
   );

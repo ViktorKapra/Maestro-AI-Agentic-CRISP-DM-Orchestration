@@ -31,6 +31,7 @@ class CaseConfig(BaseModel):
     evaluation_metric: str
     data: DataPaths
     feature_hints: dict[str, Any] = Field(default_factory=dict)
+    class_labels: dict[str, str] = Field(default_factory=dict)
     success_criterion: SuccessCriterion
 
 

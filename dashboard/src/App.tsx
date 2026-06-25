@@ -2,12 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import type { RunStatus, TabId } from "./shared/types";
 import { useCases } from "./hooks/useCasePolling";
 import { Overview } from "./pages/Overview";
+import { Process } from "./pages/Process";
+import { State } from "./pages/State";
 import { Communications } from "./pages/Communications";
 import { Architecture } from "./pages/Architecture";
 import { Timeline } from "./pages/Timeline";
+import { Knowledge } from "./pages/Knowledge";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "💖 Overview" },
+  { id: "process", label: "🌸 Process" },
+  { id: "knowledge", label: "📚 Knowledge" },
+  { id: "state", label: "🗂️ State" },
   { id: "communications", label: "💬 Communications" },
   { id: "architecture", label: "🦋 Architecture" },
   { id: "timeline", label: "⏳ Timeline" },
@@ -139,6 +145,9 @@ export default function App() {
         ) : (
           <>
             {tab === "overview" && <Overview caseId={caseId} />}
+            {tab === "process" && <Process caseId={caseId} />}
+            {tab === "knowledge" && <Knowledge caseId={caseId} />}
+            {tab === "state" && <State caseId={caseId} />}
             {tab === "communications" && (
               <Communications
                 caseId={caseId}
