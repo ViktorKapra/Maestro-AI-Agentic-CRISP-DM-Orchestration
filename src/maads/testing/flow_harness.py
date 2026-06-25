@@ -10,6 +10,7 @@ from maads.agents import (
     DeveloperAgent,
     DomainExpertAgent,
     ProjectManagerAgent,
+    StorytellerAgent,
 )
 from maads.flow.crisp_dm_flow import CrispDMFlow
 from maads.flow.phase_runner import RunContext
@@ -28,6 +29,7 @@ def make_run_context(state: CrispDMState, artifact_dir: Path) -> RunContext:
         "data_engineer": DataEngineerAgent(artifact_dir=artifact_dir),
         "data_scientist": DataScientistAgent(artifact_dir=artifact_dir),
         "developer": DeveloperAgent(artifact_dir=artifact_dir),
+        "storyteller": StorytellerAgent(artifact_dir=artifact_dir),
     }
     return RunContext.create(state, artifact_dir, agents, pm)
 
@@ -36,7 +38,7 @@ def make_run_context_stub(state: CrispDMState, artifact_dir: Path) -> RunContext
     """RunContext with mock agents (dispatch tracking without real agent work)."""
     pm = MagicMock()
     agents = {name: MagicMock() for name in (
-        "pm", "domain", "data_engineer", "data_scientist", "developer",
+        "pm", "domain", "data_engineer", "data_scientist", "developer", "storyteller",
     )}
     agents["pm"] = pm
     return RunContext.create(state, artifact_dir, agents, pm)

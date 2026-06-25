@@ -11,7 +11,7 @@ from maads.config import load_case_config
 from maads.crew import CrewKickoffError
 from maads.flow import phase_runner as pr
 from maads.paths import resolve_path
-from maads.state import SUBSTEPS, CrispDMState, Phase
+from maads.state import SUBSTEPS, CrispDMState, ModelRun, Phase
 from maads.testing.fake_llm import fake_llm_response
 from maads.testing.fake_llm import fake_llm_response
 from maads.testing.flow_harness import make_flow, make_run_context
@@ -53,9 +53,9 @@ def test_happy_path_all_substeps(mock_llm, titanic_state: CrispDMState, tmp_path
     dispatched: list[str] = []
     orig = pr.run_substep
 
-    def track(ctx, substep: str) -> None:
+    def track(ctx, substep: str) -> bool:
         dispatched.append(substep)
-        orig(ctx, substep)
+        return orig(ctx, substep)
 
     with patch.object(pr, "run_substep", side_effect=track):
         flow = make_flow(titanic_state, artifact_dir)
@@ -65,6 +65,7 @@ def test_happy_path_all_substeps(mock_llm, titanic_state: CrispDMState, tmp_path
         flow.run()
 
     assert titanic_state.dep.submission_path
+    assert titanic_state.dep.final_report_path
     assert titanic_state.dep.experience_documentation
     assert set(dispatched) == set(_all_substeps())
     assert dispatched == _all_substeps()
@@ -188,6 +189,9 @@ def test_pm_halt_before_6_4_runs_review(mock_llm, titanic_state: CrispDMState, t
     titanic_state.substep = "6.4"
     titanic_state.dep.submission_path = str(artifact_dir / "submission.csv")
     titanic_state.dep.final_report_path = str(artifact_dir / "final_report.md")
+    run = ModelRun(technique="rf", cv_score=0.82, assessment="ok")
+    titanic_state.md.chosen_model = run
+    titanic_state.ev.assessment_of_dm_results = {"meets": True, "cv_score": 0.82}
     ctx = make_run_context(titanic_state, artifact_dir)
     ctx.pm.plan = lambda _s: Plan(  # type: ignore[method-assign]
         action="halt",
@@ -222,6 +226,8 @@ def test_loop_blocked_when_cap_reached(mock_llm, titanic_state: CrispDMState, tm
 
     assert not titanic_state.loop_history
     assert any("loop blocked" in e.message for e in titanic_state.log)
+    assert titanic_state.halted
+    assert "recovery budget exhausted" in (titanic_state.halt_reason or "")
 
 
 @patch("maads.agents.run_json_task")
@@ -276,3 +282,34 @@ def test_proof_milestone_degraded_then_loop_b(mock_llm, titanic_state: CrispDMSt
 
     assert titanic_state.loop_history and titanic_state.loop_history[0].label == "B"
     assert titanic_state.dep.submission_path
+
+
+@patch("maads.agents.run_json_task")
+def test_checkpoint_5_1_does_not_fire_loop_c_on_unevaluated_goal(
+    mock_llm, titanic_state: CrispDMState, tmp_path: Path,
+):
+    """PM at 5.1 must not treat missing assessment as business-goal failure."""
+    mock_llm.side_effect = fake_llm_response
+    thr = titanic_state.config.success_criterion.threshold
+    titanic_state.md.chosen_model = ModelRun(
+        technique="gradient_boosting",
+        cv_score=thr + 0.05,
+        description="strong model",
+    )
+    titanic_state.ev.assessment_of_dm_results = None
+    titanic_state.substep = "5.1"
+    assert titanic_state.view_for("pm")["business_goal_met"] is None
+
+    artifact_dir = _artifact_dir(tmp_path)
+    flow = make_flow(titanic_state, artifact_dir)
+    plans = iter([
+        Plan(action="advance", reason="ok"),
+        *[Plan(action="advance", reason="ok") for _ in range(60)],
+        Plan(action="halt", reason="done"),
+    ])
+    flow._pm.plan = lambda _s: next(plans, Plan(action="halt", reason="done"))  # type: ignore[method-assign]
+    flow.run()
+
+    assert not any(le.label == "C" for le in titanic_state.loop_history)
+    assessment = titanic_state.ev.assessment_of_dm_results or {}
+    assert assessment.get("meets") is True

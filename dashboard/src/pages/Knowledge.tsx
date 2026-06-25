@@ -55,8 +55,8 @@ export function Knowledge({ caseId }: Props) {
         <p className="text-sm text-slate-400">
           Grounds the <span className="text-slate-200">Domain Expert</span> at
           substeps {rag.domain_substeps_using_rag.join(", ")} via{" "}
-          <code className="text-accent-muted text-xs">maads.rag</code> and CrewAI
-          Knowledge.
+          <code className="text-accent-muted text-xs">maads.rag</code> explicit
+          retrieval in task prompts.
         </p>
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
           <div>
@@ -70,9 +70,9 @@ export function Knowledge({ caseId }: Props) {
             <dd className="text-slate-200 font-mono">{rag.chunk_count}</dd>
           </div>
           <div>
-            <dt className="text-slate-500">CrewAI Knowledge</dt>
+            <dt className="text-slate-500">Explicit RAG</dt>
             <dd className="text-slate-200">
-              {rag.crewai_knowledge_enabled ? "Enabled" : "Off"}
+              {rag.explicit_rag_enabled ? "Enabled" : "Off"}
             </dd>
           </div>
           <div>

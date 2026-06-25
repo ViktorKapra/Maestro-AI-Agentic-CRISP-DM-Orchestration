@@ -5,9 +5,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from maads.output_contracts import schema_hint_for_agent
 from maads.state import CrispDMState, SUBSTEP_NAMES
 
-DATA_SCIENTIST_OUTPUT_SCHEMA_HINT = "{\n  \"assignment_id\": \"string\",\n  \"agent\": \"data_scientist\",\n  \"status\": \"COMPLETED|PARTIAL|REVISION_REQUIRED|BLOCKED|HANDOFF_REQUIRED\",\n  \"summary\": \"string\",\n  \"state_updates\": {\n    \"du\": {\"data_exploration_report\": \"object|null\"},\n    \"md\": {\n      \"modeling_technique\": \"string|null\",\n      \"modeling_assumptions\": [\"string\"],\n      \"test_design\": \"object|null\",\n      \"models_append\": [\"ModelRun\"],\n      \"chosen_model\": \"ModelRun|null\"\n    },\n    \"ev\": {\n      \"assessment_of_dm_results\": \"object|null\",\n      \"approved_models\": [\"ModelRun\"]\n    }\n  },\n  \"model_runs\": [{\n    \"technique\": \"string\",\n    \"parameter_settings\": \"object\",\n    \"description\": \"string\",\n    \"cv_score\": \"number|null\",\n    \"cv_score_std\": \"number|null\",\n    \"holdout_score\": \"number|null\",\n    \"assessment\": \"string|null\",\n    \"revised_parameter_settings\": \"object|null\",\n    \"is_baseline\": \"boolean\"\n  }],\n  \"evidence\": [{\"evidence_id\": \"string\", \"claim\": \"string\", \"source\": \"string\", \"method\": \"string\"}],\n  \"decisions\": [{\"decision_id\": \"string\", \"decision\": \"string\", \"rationale\": \"string\", \"evidence_ids\": [\"string\"], \"affected_fields\": [\"string\"]}],\n  \"validations\": [{\"validation_id\": \"string\", \"check\": \"string\", \"status\": \"PASS|WARNING|FAIL|NOT_RUN\", \"evidence\": \"string\"}],\n  \"leakage_checks\": [{\"check\": \"string\", \"status\": \"PASS|WARNING|FAIL\", \"evidence\": \"string\"}],\n  \"diagnostics\": [{\"finding_id\": \"string\", \"category\": \"string\", \"severity\": \"INFO|LOW|MEDIUM|HIGH\", \"evidence\": \"string\", \"interpretation\": \"string\", \"recommended_owner\": \"string\"}],\n  \"artifacts\": [{\"artifact_id\": \"string\", \"artifact_type\": \"string\", \"path\": \"string\", \"version\": \"string\", \"fingerprint\": \"string|null\", \"source_lineage\": [\"string\"], \"intended_use\": \"string\", \"validation_status\": \"string\"}],\n  \"assumptions\": [{\"assumption_id\": \"string\", \"statement\": \"string\", \"evidence\": \"string\", \"risk_if_wrong\": \"string\", \"confirmation_owner\": \"string\"}],\n  \"risks\": [{\"risk_id\": \"string\", \"severity\": \"string\", \"description\": \"string\", \"mitigation\": \"string\", \"owner\": \"string\"}],\n  \"blockers\": [{\"blocker_id\": \"string\", \"description\": \"string\", \"missing_requirement\": \"string\", \"requested_owner\": \"string\"}],\n  \"handoffs\": [{\"target_role\": \"string\", \"reason\": \"string\", \"requested_action\": \"string\", \"supporting_artifacts\": [\"string\"]}],\n  \"loop_signal\": {\"recommended\": false, \"contour\": \"NONE|B_4_TO_3|C_5_TO_1\", \"reason\": \"string|null\", \"evidence_ids\": [\"string\"]},\n  \"completion_evidence\": {\n    \"input_contract_valid\": true,\n    \"required_outputs_present\": true,\n    \"execution_succeeded\": true,\n    \"baseline_established\": true,\n    \"leakage_checks_passed\": true,\n    \"uncertainty_reported\": true,\n    \"evaluated_against_success_criterion\": \"boolean|null\",\n    \"safe_for_downstream_use\": true\n  }\n}"
+DATA_SCIENTIST_OUTPUT_SCHEMA_HINT = schema_hint_for_agent("data_scientist")
 
 _SUBSTEP_ASSIGNMENTS: dict[str, dict[str, Any]] = {
     "2.3": {
@@ -62,11 +63,12 @@ _SUBSTEP_ASSIGNMENTS: dict[str, dict[str, Any]] = {
         ]
     },
     "4.4": {
-        "objective": "Assess model runs and select the chosen model",
+        "objective": "Assess model runs with execution-backed evaluation_bundle and select chosen model",
         "requested_outputs": [
             "md.chosen_model"
         ],
         "completion_criteria": [
+            "evaluation_bundle includes per-class metrics and confusion matrix for classification",
             "Assessment cites concrete scores; compare against baseline"
         ],
         "constraints": [
@@ -159,8 +161,6 @@ def format_data_scientist_task(
     runtime_input = {
         "assignment": assignment,
         "inputs": inputs,
-        "state_view": state.view_for("data_scientist"),
-        "artifact_directory": str(artifact_dir.resolve()),
     }
     instruction = (
         "Complete the assigned CRISP-DM substep using the runtime input below. "

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from maads.paths import resolve_path
 from maads.state import CrispDMState
@@ -104,6 +104,40 @@ def execution_or_llm(execution: dict[str, Any], llm_parent: dict, key: str) -> A
     if key in execution and execution[key] is not None:
         return execution[key]
     return llm_parent.get(key)
+
+
+_DE_EXECUTION_AUTHORITY_KEYS: dict[str, tuple[str, ...]] = {
+    "2.1": ("initial_data_collection_report",),
+    "2.2": ("data_description_report",),
+    "2.4": ("data_quality_report",),
+    "3.2": ("data_cleaning_report",),
+    "3.3": ("derived_attributes", "generated_records"),
+    "3.4": ("merged_data",),
+    "3.5": ("dataset", "dataset_description"),
+}
+
+_DS_EXECUTION_AUTHORITY_KEYS: dict[str, tuple[str, ...]] = {
+    "2.3": ("data_exploration_report",),
+    "4.3": ("model_run",),
+    "4.4": ("evaluation_bundle",),
+}
+
+
+def execution_authoritative(
+    execution: dict[str, Any],
+    substep: str,
+    agent: Literal["data_engineer", "data_scientist"],
+) -> bool:
+    """True when measured codegen output already satisfies the substep contract."""
+    keys = (
+        _DE_EXECUTION_AUTHORITY_KEYS
+        if agent == "data_engineer"
+        else _DS_EXECUTION_AUTHORITY_KEYS
+    )
+    return any(
+        execution.get(key) is not None
+        for key in keys.get(substep, ())
+    )
 
 
 def measure_prep_artifacts(

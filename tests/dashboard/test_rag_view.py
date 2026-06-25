@@ -22,5 +22,7 @@ def test_build_rag_view_for_case():
     assert view["chunk_count"] > 0
     assert view["corpus_files"]
     assert view["consumer_agent"] == "domain"
+    assert view["explicit_rag_enabled"] is True
+    assert view["crewai_knowledge_enabled"] is False
     assert "disaster_tweets" in view["retrieval_query_preview"]
     assert isinstance(view["retrieved_passages"], list)

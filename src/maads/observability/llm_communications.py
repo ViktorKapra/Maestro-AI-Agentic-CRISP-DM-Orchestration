@@ -96,6 +96,7 @@ class LLMCommunicationRecord(BaseModel):
     maads: dict[str, Any] = Field(default_factory=dict)
     provider: dict[str, Any] = Field(default_factory=dict)
     outcome: dict[str, Any] = Field(default_factory=dict)
+    parent_comm_id: str | None = None
     closed: bool = False
 
 
@@ -109,6 +110,7 @@ class LLMCommunicationRegistry:
         self._open: dict[str, LLMCommunicationRecord] = {}
         self._pending_by_agent: dict[tuple[str, str], str] = {}
         self._by_call_id: dict[str, str] = {}
+        self._exported_ids: set[str] = set()
 
     def reset(self) -> None:
         with self._lock:
@@ -117,10 +119,15 @@ class LLMCommunicationRegistry:
             self._open = {}
             self._pending_by_agent = {}
             self._by_call_id = {}
+            self._exported_ids = set()
 
     def _next_id(self) -> str:
         self._counter += 1
         return f"comm_{self._counter:04d}"
+
+    def open_record_ids(self) -> list[str]:
+        with self._lock:
+            return [cid for cid, rec in self._open.items() if not rec.closed]
 
     def open_record(
         self,
@@ -133,6 +140,7 @@ class LLMCommunicationRegistry:
         model: str | None = None,
         maads: dict[str, Any] | None = None,
         trace_event_id: str | None = None,
+        parent_comm_id: str | None = None,
     ) -> str:
         mode = llm_io_mode()
         maads_data = dict(maads or {})
@@ -159,6 +167,7 @@ class LLMCommunicationRegistry:
             role=role,
             model=model,
             maads=maads_data,
+            parent_comm_id=parent_comm_id,
         )
         if trace_event_id:
             record.trace_event_ids["crew.start"] = trace_event_id
@@ -179,11 +188,6 @@ class LLMCommunicationRegistry:
         with self._lock:
             if call_id and call_id in self._by_call_id:
                 return self._by_call_id[call_id]
-            if call_id:
-                for comm_id, rec in self._open.items():
-                    if not rec.closed:
-                        self._by_call_id[call_id] = comm_id
-                        return comm_id
             if agent_role:
                 from maads.observability.agent_labels import maads_id_for_role
 
@@ -295,6 +299,10 @@ class LLMCommunicationRegistry:
         raw_response: str | None = None,
         parsed_json: dict[str, Any] | None = None,
         parse_ok: bool = False,
+        json_valid: bool | None = None,
+        schema_ok: bool | None = None,
+        schema_errors: list[str] | None = None,
+        repair: dict[str, Any] | None = None,
         tokens: dict[str, int | None] | None = None,
         error: str | None = None,
         trace_event_id: str | None = None,
@@ -319,6 +327,14 @@ class LLMCommunicationRegistry:
                         record.tokens[k] = v
 
             outcome: dict[str, Any] = {"parse_ok": parse_ok}
+            if json_valid is not None:
+                outcome["json_valid"] = json_valid
+            if schema_ok is not None:
+                outcome["schema_ok"] = schema_ok
+            if schema_errors:
+                outcome["schema_errors"] = schema_errors
+            if repair:
+                outcome["repair"] = repair
             if error:
                 outcome["error"] = error
             if mode != "off":
@@ -340,7 +356,25 @@ class LLMCommunicationRegistry:
             if record.call_id and record.call_id in self._by_call_id:
                 if self._by_call_id[record.call_id] == comm_id:
                     del self._by_call_id[record.call_id]
+        self._try_incremental_export(record)
         return record
+
+    def _try_incremental_export(self, record: LLMCommunicationRecord) -> None:
+        from maads.artifact_config import trace_incremental
+        from maads.observability import context as ctx
+
+        if not trace_incremental():
+            return
+        out = ctx.export_dir.get()
+        if out is None or record.id in self._exported_ids:
+            return
+        from maads.observability.communication_exporter import append_communication_record
+
+        append_communication_record(self, record, out)
+
+    def mark_exported(self, comm_id: str) -> None:
+        with self._lock:
+            self._exported_ids.add(comm_id)
 
     def get_record(self, comm_id: str) -> LLMCommunicationRecord | None:
         with self._lock:
@@ -375,7 +409,6 @@ class LLMCommunicationRegistry:
 
 
 def build_communications_summary(records: list[LLMCommunicationRecord]) -> dict[str, Any]:
-    """Compact aggregates for optimizer agents."""
     by_agent: dict[str, dict[str, Any]] = {}
     by_model: dict[str, int] = {}
     total_tokens = 0
@@ -432,6 +465,22 @@ def build_communications_summary(records: list[LLMCommunicationRecord]) -> dict[
         "by_agent": by_agent,
         "by_model": by_model,
     }
+
+
+def record_for_export(rec: LLMCommunicationRecord) -> dict[str, Any]:
+    """Serialize a comm record without duplicating raw_response in provider/outcome."""
+    data = rec.model_dump(mode="json")
+    provider = dict(data.get("provider") or {})
+    outcome = dict(data.get("outcome") or {})
+    prov_resp = provider.get("raw_response")
+    out_resp = outcome.get("raw_response")
+    if prov_resp is not None and out_resp is not None:
+        if str(prov_resp) == str(out_resp):
+            del provider["raw_response"]
+            outcome["response_ref"] = "provider.raw_response"
+    data["provider"] = provider
+    data["outcome"] = outcome
+    return data
 
 
 _registry: LLMCommunicationRegistry | None = None

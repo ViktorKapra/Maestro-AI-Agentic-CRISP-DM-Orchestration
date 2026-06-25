@@ -4,8 +4,11 @@ state_only:
     {state_view}
 
 
-    {instruction}'
-  expected_output: A single JSON object, no prose, no Markdown fences.
+    {instruction}
+
+
+    Return the raw JSON payload matching the target schema. Your response must begin with ''{{'' and end with ''}}''. Do not include markdown wraps.'
+  expected_output: A single JSON object, no prose, no Markdown fences. Response must begin with '{' and end with '}'.
 substep_json:
   description: 'CRISP-DM substep {substep} ({substep_name}).
 
@@ -17,7 +20,10 @@ substep_json:
     {state_view}
 
 
-    Respond ONLY with JSON matching: {schema_hint}'
-  expected_output: A single JSON object, no prose, no Markdown fences.
+    Respond ONLY with JSON matching: {schema_hint}
+
+
+    Return the raw JSON payload matching the target schema. Your response must begin with ''{{'' and end with ''}}''. Do not include markdown wraps.'
+  expected_output: A single JSON object, no prose, no Markdown fences. Response must begin with '{' and end with '}'.
 authored_code:
   expected_output: A Python code block.

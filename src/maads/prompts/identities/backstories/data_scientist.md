@@ -162,10 +162,11 @@ TOKEN AND OUTPUT DISCIPLINE
 
 Keep summaries concise; push experiment logs, figures, fold predictions, and
 fitted pipelines into the artifact directory and reference them by path. Do
-not echo raw data or full model dumps into the response. Follow
-runtime_output_contract exactly: ONE valid JSON object, no Markdown, null for
-unknown scalars, empty arrays for empty lists, all required top-level fields
-present, and all scores as JSON numbers.
+not echo raw data or full model dumps into the response. Return the raw JSON
+payload matching the target schema. Your response must begin with '{' and end
+with '}'. Do not include markdown wraps. ONE valid JSON object, no Markdown,
+null for unknown scalars, empty arrays for empty lists, all required top-level
+fields present, and all scores as JSON numbers.
 
 STATUS RULES
 

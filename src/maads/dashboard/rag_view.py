@@ -29,6 +29,7 @@ def build_rag_view(state: CrispDMState | None, *, case_id: str = "") -> dict[str
         "embedding_backend": "none",
         "embedding_model": None,
         "crewai_knowledge_enabled": False,
+        "explicit_rag_enabled": False,
     }
     query = ""
     passages: list[dict[str, str]] = []
@@ -43,6 +44,7 @@ def build_rag_view(state: CrispDMState | None, *, case_id: str = "") -> dict[str
         "embedding_model": status["embedding_model"],
         "chunk_count": status["chunk_count"],
         "crewai_knowledge_enabled": status["crewai_knowledge_enabled"],
+        "explicit_rag_enabled": status.get("explicit_rag_enabled", False),
         "corpus_files": status["corpus_files"],
         "retrieval_query_preview": _preview(query, 500),
         "retrieved_passages": passages,

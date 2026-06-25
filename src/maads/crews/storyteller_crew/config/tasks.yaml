@@ -1,0 +1,13 @@
+substep_json:
+  description: >
+    CRISP-DM substep {substep} ({substep_name}).
+
+    {instruction}
+
+    Relevant state (JSON):
+
+    {state_view}
+
+    Respond ONLY with JSON matching: {schema_hint}
+  expected_output: A single JSON object, no prose, no Markdown fences.
+  agent: storyteller

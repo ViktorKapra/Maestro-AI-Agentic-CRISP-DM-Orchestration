@@ -1,7 +1,6 @@
 """Retrieval-augmented generation over the ``knowledge/`` markdown corpus.
 
-Used by the Domain Expert task prompts (explicit passages in ``domain_corpus``)
-and complemented by CrewAI ``TextFileKnowledgeSource`` on the domain agent.
+Used by the Domain Expert task prompts (explicit passages in ``domain_corpus``).
 """
 from __future__ import annotations
 
@@ -17,18 +16,32 @@ from pathlib import Path
 from typing import Any
 
 from maads.knowledge_setup import knowledge_corpus_paths, resolve_embedder_config
+from maads.text_normalize import dedupe_passages, strip_markdown_headers
 from maads.state import CrispDMState
 
 _log = logging.getLogger(__name__)
 
 _DEFAULT_OPENAI_EMBED_MODEL = "text-embedding-3-small"
 _CHUNK_MAX_CHARS = 1200
+_MERGE_SMALL_THRESHOLD = 400
+_HEADING_LINE_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+
+
+@dataclass(frozen=True)
+class RetrievedPassage:
+    source: str
+    text: str
+    section: str | None = None
+
+    def format(self) -> str:
+        return f"[{self.source}] {self.text}"
 
 
 @dataclass(frozen=True)
 class _Chunk:
     source: str
     text: str
+    section: str | None = None
 
 
 @dataclass
@@ -54,6 +67,12 @@ def retrieve_for_state(state: CrispDMState, *, k: int = 6) -> list[str]:
     return _retriever_for(state.case_id).retrieve(query, k=k)
 
 
+def retrieve_passages_for_state(state: CrispDMState, *, k: int = 6) -> list[RetrievedPassage]:
+    """Return structured top-k RAG passages for a CRISP-DM state."""
+    query = build_retrieval_query(state)
+    return _retriever_for(state.case_id).retrieve_passages(query, k=k)
+
+
 def rag_status(case_id: str) -> dict[str, Any]:
     """Index metadata for dashboards and observability."""
     paths = knowledge_corpus_paths(case_id)
@@ -65,6 +84,7 @@ def rag_status(case_id: str) -> dict[str, Any]:
             "embedding_backend": "none",
             "embedding_model": None,
             "crewai_knowledge_enabled": False,
+            "explicit_rag_enabled": False,
         }
     retriever = RAGRetriever(paths)
     embed_cfg = resolve_embedder_config() or {}
@@ -79,7 +99,8 @@ def rag_status(case_id: str) -> dict[str, Any]:
         "chunk_count": retriever.chunk_count,
         "embedding_backend": retriever.backend,
         "embedding_model": model,
-        "crewai_knowledge_enabled": True,
+        "crewai_knowledge_enabled": False,
+        "explicit_rag_enabled": True,
     }
 
 
@@ -100,8 +121,27 @@ def _corpus_file_entry(path: Path, case_id: str) -> dict[str, Any]:
     }
 
 
+def _report_query_snippet(report: dict[str, Any] | None) -> str:
+    if not report:
+        return ""
+    parts: list[str] = []
+    for key in ("row_count", "train_rows", "test_rows", "target_column", "summary"):
+        val = report.get(key)
+        if val is not None:
+            parts.append(f"{key}={val}")
+    blockers = report.get("blockers") or report.get("quality_blockers")
+    if isinstance(blockers, list) and blockers:
+        parts.append("blockers=" + "; ".join(str(b) for b in blockers[:5]))
+    target_dist = report.get("target_distribution") or report.get("class_balance")
+    if target_dist is not None:
+        parts.append(f"target_distribution={json.dumps(target_dist, default=str)[:500]}")
+    if parts:
+        return " ".join(parts)
+    return json.dumps(report, default=str)[:500]
+
+
 def build_retrieval_query(state: CrispDMState) -> str:
-    """Build a retrieval query from case config and any DU reports in state."""
+    """Build a retrieval query from case config and summarized DU reports."""
     cfg = state.config
     parts = [
         cfg.case_id,
@@ -116,8 +156,9 @@ def build_retrieval_query(state: CrispDMState) -> str:
         state.du.data_quality_report,
         state.du.data_exploration_report,
     ):
-        if report:
-            parts.append(json.dumps(report, default=str)[:2000])
+        snippet = _report_query_snippet(report)
+        if snippet:
+            parts.append(snippet)
     return " ".join(p for p in parts if p)
 
 
@@ -151,6 +192,10 @@ class RAGRetriever:
 
     def retrieve(self, query: str, k: int = 4) -> list[str]:
         """Return top-k passages formatted as ``[source] text``."""
+        return [p.format() for p in self.retrieve_passages(query, k=k)]
+
+    def retrieve_passages(self, query: str, k: int = 4) -> list[RetrievedPassage]:
+        """Return top-k structured passages after ranking and deduplication."""
         if not query.strip() or not self._index.chunks:
             return []
         k = max(1, k)
@@ -158,14 +203,21 @@ class RAGRetriever:
             ranked = self._rank_by_embedding(query, k)
         else:
             ranked = self._rank_by_keywords(query, k)
-        return [f"[{c.source}] {c.text}" for c in ranked]
+        formatted = [RetrievedPassage(c.source, c.text, c.section) for c in ranked]
+        deduped_strings = dedupe_passages([p.format() for p in formatted])
+        by_format = {p.format(): p for p in formatted}
+        return [by_format[s] for s in deduped_strings if s in by_format]
 
     def _build_index(self) -> _Index:
         chunks: list[_Chunk] = []
         for path in self._paths:
             text = path.read_text(encoding="utf-8")
-            for para in _split_paragraphs(text):
-                chunks.append(_Chunk(source=path.name, text=para))
+            for section, body in _split_markdown_sections(text):
+                for para_text in _chunk_section_body(body):
+                    cleaned = strip_markdown_headers(para_text, keep_first=True)
+                    if cleaned:
+                        chunks.append(_Chunk(source=path.name, text=cleaned, section=section))
+        chunks = _merge_small_chunks(chunks)
         backend, vectors = _embed_chunks([c.text for c in chunks])
         return _Index(chunks=chunks, vectors=vectors, backend=backend)
 
@@ -197,20 +249,85 @@ class RAGRetriever:
         return [self._index.chunks[i] for _, i in scored[:k]]
 
 
-def _split_paragraphs(text: str) -> list[str]:
+def _split_markdown_sections(text: str) -> list[tuple[str | None, str]]:
+    """Split markdown into (section_heading, body) pairs."""
+    sections: list[tuple[str | None, str]] = []
+    current_section: str | None = None
+    current_lines: list[str] = []
+    doc_title: str | None = None
+
+    for line in text.splitlines():
+        m = _HEADING_LINE_RE.match(line.strip())
+        if m:
+            level = len(m.group(1))
+            heading = m.group(2).strip()
+            if current_lines:
+                sections.append((current_section, "\n".join(current_lines).strip()))
+                current_lines = []
+            if level == 1 and doc_title is None:
+                doc_title = heading
+                current_section = None
+            else:
+                current_section = heading
+        else:
+            current_lines.append(line)
+
+    if current_lines:
+        sections.append((current_section, "\n".join(current_lines).strip()))
+
+    if not sections and text.strip():
+        return [(doc_title, text.strip())]
+    return sections
+
+
+def _chunk_section_body(body: str) -> list[str]:
+    """Split section body into chunks; continuation pieces omit repeated headings."""
+    if not body.strip():
+        return []
+    paragraphs = [p.strip() for p in body.split("\n\n") if p.strip()]
     out: list[str] = []
-    for para in text.split("\n\n"):
-        para = para.strip()
-        if not para:
-            continue
+    for para in paragraphs:
         if len(para) <= _CHUNK_MAX_CHARS:
             out.append(para)
             continue
         for i in range(0, len(para), _CHUNK_MAX_CHARS):
             piece = para[i : i + _CHUNK_MAX_CHARS].strip()
-            if piece:
+            if not piece:
+                continue
+            if i == 0:
                 out.append(piece)
+            else:
+                out.append(strip_markdown_headers(piece, keep_first=False))
     return out
+
+
+def _merge_small_chunks(chunks: list[_Chunk]) -> list[_Chunk]:
+    """Merge adjacent small chunks from the same source and section."""
+    if not chunks:
+        return []
+    merged: list[_Chunk] = []
+    buffer: _Chunk | None = None
+    for chunk in chunks:
+        if buffer is None:
+            buffer = chunk
+            continue
+        same_group = (
+            buffer.source == chunk.source
+            and buffer.section == chunk.section
+            and len(buffer.text) + len(chunk.text) + 2 <= _MERGE_SMALL_THRESHOLD
+        )
+        if same_group and len(buffer.text) < _MERGE_SMALL_THRESHOLD:
+            buffer = _Chunk(
+                source=buffer.source,
+                text=f"{buffer.text}\n\n{chunk.text}",
+                section=buffer.section,
+            )
+        else:
+            merged.append(buffer)
+            buffer = chunk
+    if buffer is not None:
+        merged.append(buffer)
+    return merged
 
 
 def _embed_chunks(texts: list[str]) -> tuple[str, list[list[float]] | None]:
@@ -283,7 +400,6 @@ def _embed_openai(texts: list[str]) -> list[list[float]]:
 
     model = (os.getenv("OPENAI_EMBED_MODEL") or _DEFAULT_OPENAI_EMBED_MODEL).strip()
     client = OpenAI()
-    # OpenAI accepts batches; chunk to stay within limits
     batch_size = 64
     vectors: list[list[float]] = []
     for i in range(0, len(texts), batch_size):

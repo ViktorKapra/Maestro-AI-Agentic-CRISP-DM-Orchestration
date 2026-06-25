@@ -11,15 +11,12 @@ from maads.agents import (
     DeveloperAgent,
     DomainExpertAgent,
     ProjectManagerAgent,
+    StorytellerAgent,
 )
+from maads.outcome import completion_halt_reason
 from maads.flow import phase_runner as pr
 from maads.flow.routers import checkpoint_route
-from maads.flow.tracing import (
-    install_flow_run_tracer,
-    trace_flow_method,
-    trace_substep_dispatch,
-    trace_substep_end,
-)
+from maads.flow.tracing import install_flow_run_tracer, trace_flow_method
 from maads.observability.collector import get_collector
 from maads.state import Phase, CrispDMState
 
@@ -40,6 +37,7 @@ class CrispDMFlow(Flow[CrispDMState]):
             "data_engineer": DataEngineerAgent(artifact_dir=artifact_dir),
             "data_scientist": DataScientistAgent(artifact_dir=artifact_dir),
             "developer": DeveloperAgent(artifact_dir=artifact_dir),
+            "storyteller": StorytellerAgent(artifact_dir=artifact_dir),
         }
         self._ctx = pr.RunContext.create(state, artifact_dir, self._agents, self._pm)
         self._pending_route: str | None = None
@@ -167,6 +165,8 @@ class CrispDMFlow(Flow[CrispDMState]):
     @router(enter_checkpoint_5_1)
     def route_checkpoint_5_1(self) -> str:
         route = self._last_checkpoint_route
+        if route == "phase_1":
+            return "phase_1"
         if route == "phase_3":
             return "phase_3"
         if route == "halt":
@@ -179,11 +179,7 @@ class CrispDMFlow(Flow[CrispDMState]):
         if self.state.halted:
             self._pending_route = "halt"
             return
-        trace_substep_dispatch(self.state, "5.1")
-        try:
-            pr.run_substep(self._ctx, "5.1")
-        finally:
-            trace_substep_end("5.1")
+        pr.execute_substep(self._ctx, "5.1")
         if self.state.halted:
             self._pending_route = "halt"
             return
@@ -225,11 +221,7 @@ class CrispDMFlow(Flow[CrispDMState]):
                 pr.force_halt(self.state, reason)
                 self._pending_route = "halt"
                 return
-            trace_substep_dispatch(self.state, substep)
-            try:
-                pr.run_substep(self._ctx, substep)
-            finally:
-                trace_substep_end(substep)
+            pr.execute_substep(self._ctx, substep)
             if pr.advance_substep(self._ctx):
                 self._pending_route = "complete"
                 return
@@ -261,7 +253,9 @@ class CrispDMFlow(Flow[CrispDMState]):
     def finish(self) -> CrispDMState:
         if not self.state.halted and int(self.state.phase) == int(Phase.DEPLOYMENT):
             self.state.halted = True
-            self.state.halt_reason = self.state.halt_reason or "completed phase 6"
+            self.state.halt_reason = (
+                self.state.halt_reason or completion_halt_reason(self.state)
+            )
         return self._state
 
     def run(self) -> CrispDMState:

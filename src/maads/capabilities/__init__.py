@@ -7,7 +7,10 @@ from maads.capabilities.developer import (
     build_submission,
     experience_review,
     plan_monitoring,
-    write_final_report,
+)
+from maads.capabilities.storyteller import (
+    apply_response as storyteller_apply_response,
+    render_final_report_step,
 )
 from maads.capabilities.domain import (
     apply_refine_goals,
@@ -25,6 +28,7 @@ __all__ = [
     "apply_refine_goals",
     "build_submission",
     "plan_monitoring",
-    "write_final_report",
     "experience_review",
+    "storyteller_apply_response",
+    "render_final_report_step",
 ]

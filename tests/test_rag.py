@@ -78,3 +78,39 @@ def test_rag_uses_ollama_embeddings_when_available(monkeypatch, tmp_path: Path):
     rag = RAGRetriever(corpus)
     hits = rag.retrieve("Alpha bravo", k=1)
     assert hits and "Alpha" in hits[0]
+
+
+def test_rag_strips_document_title_header(tmp_path: Path):
+    corpus = tmp_path / "knowledge"
+    corpus.mkdir()
+    (corpus / "a.md").write_text(
+        "# Titanic — domain notes\n\nPassenger survival uses features.",
+        encoding="utf-8",
+    )
+    rag = RAGRetriever(corpus)
+    assert rag.chunk_count >= 1
+    assert not rag._index.chunks[0].text.startswith("#")
+
+
+def test_rag_dedupes_duplicate_passages_across_files(tmp_path: Path):
+    corpus = tmp_path / "knowledge"
+    corpus.mkdir()
+    dup = "Titanic survival prediction uses passenger features."
+    (corpus / "a.md").write_text(dup, encoding="utf-8")
+    (corpus / "b.md").write_text(dup, encoding="utf-8")
+    rag = RAGRetriever(corpus)
+    hits = rag.retrieve("Titanic survival passenger", k=3)
+    bodies = {h.split("] ", 1)[-1] for h in hits}
+    assert len(bodies) == 1
+
+
+def test_build_retrieval_query_uses_report_snippets():
+    cfg = load_case_config(resolve_path("configs/disaster_tweets.yaml"))
+    state = CrispDMState.from_config(cfg)
+    state.du.data_quality_report = {
+        "row_count": 1000,
+        "blockers": ["missing target"],
+    }
+    query = build_retrieval_query(state)
+    assert "row_count=1000" in query
+    assert "blockers=" in query

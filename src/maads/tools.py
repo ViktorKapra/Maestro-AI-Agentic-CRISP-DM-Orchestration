@@ -146,9 +146,17 @@ class PythonExec:
         stderr_path.write_text(result.stderr, encoding="utf-8")
 
         manifest = self.workdir / "exec" / "manifest.jsonl"
+        substep = ""
+        try:
+            from maads.observability import context as obs_ctx
+
+            substep = obs_ctx.current_substep.get() or ""
+        except Exception:
+            pass
         record = {
             "seq": self._exec_seq,
             "label": label or None,
+            "substep": substep or None,
             "script": script_path.name,
             "stdout": stdout_path.name,
             "stderr": stderr_path.name,
@@ -156,8 +164,16 @@ class PythonExec:
             "return_code": result.return_code,
             "timed_out": result.timed_out,
         }
+        line = json.dumps(record, default=str) + "\n"
         with manifest.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, default=str) + "\n")
+            fh.write(line)
+        collected_manifest = (
+            self.workdir.parent / "collected" / "sandbox" / "manifest.jsonl"
+        )
+        if collected_manifest.parent.name == "sandbox":
+            collected_manifest.parent.mkdir(parents=True, exist_ok=True)
+            with collected_manifest.open("a", encoding="utf-8") as fh:
+                fh.write(line)
 
     def _make_env(self, extra: dict[str, str] | None) -> dict[str, str]:
         import os

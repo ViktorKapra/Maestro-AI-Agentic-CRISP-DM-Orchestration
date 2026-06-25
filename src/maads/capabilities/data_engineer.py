@@ -249,6 +249,24 @@ def execution_evidence(
     return {}
 
 
+_EXECUTION_AUTHORITY_KEYS: dict[str, tuple[str, ...]] = {
+    "2.1": ("initial_data_collection_report",),
+    "2.2": ("data_description_report",),
+    "2.4": ("data_quality_report",),
+    "3.2": ("data_cleaning_report",),
+    "3.3": ("derived_attributes", "generated_records"),
+    "3.4": ("merged_data",),
+    "3.5": ("dataset", "dataset_description"),
+}
+
+
+def _execution_authoritative(execution: dict[str, Any], substep: str) -> bool:
+    return any(
+        execution.get(key) is not None
+        for key in _EXECUTION_AUTHORITY_KEYS.get(substep, ())
+    )
+
+
 def apply_response(
     data: dict,
     state: CrispDMState,
@@ -256,6 +274,15 @@ def apply_response(
     execution: dict[str, Any],
 ) -> StateDelta:
     from maads.capabilities.shared import execution_or_llm, record_degraded
+    from maads.output_contracts import validate_agent_output
+
+    if not _execution_authoritative(execution, substep):
+        schema_errors = validate_agent_output("data_engineer", data, substep=substep)
+        if schema_errors:
+            return StateDelta(
+                notes=f"DE {substep}: schema-invalid response: {schema_errors[0]}",
+                failed=True,
+            )
 
     su = (data or {}).get("state_updates") or {}
     du = su.get("du") or {}

@@ -24,6 +24,9 @@ export interface StatusPayload {
   token_spend: Record<string, number>;
   halted: boolean;
   halt_reason: string | null;
+  workflow_complete?: boolean;
+  ml_success?: boolean;
+  ml_deficits?: string[];
   artifact_dir: string;
   trace_dir: string;
 }
@@ -62,7 +65,20 @@ export interface CommunicationRecord {
   tokens: { prompt?: number | null; completion?: number | null; total?: number | null };
   maads: Record<string, unknown>;
   provider: Record<string, unknown>;
-  outcome: { parse_ok?: boolean; error?: string; raw_response?: string };
+  outcome: {
+    parse_ok?: boolean;
+    json_valid?: boolean;
+    schema_ok?: boolean;
+    schema_errors?: string[];
+    repair?: {
+      kind?: string;
+      requesting_agent?: string;
+      succeeded?: boolean;
+    };
+    error?: string;
+    raw_response?: string;
+  };
+  parent_comm_id?: string | null;
   closed: boolean;
 }
 
@@ -144,12 +160,55 @@ export interface ConclusionHighlight {
   value: string;
 }
 
+export interface LiveSummary {
+  updated_at: string;
+  case_id: string;
+  phase: number;
+  phase_name: string;
+  substep: string;
+  substep_name: string;
+  activity: string;
+  progress: {
+    completed_substeps: number;
+    total_substeps: number;
+    source: string;
+  };
+  halted: boolean;
+  halt_reason: string | null;
+  workflow_complete?: boolean;
+  ml_success?: boolean;
+  ml_deficits?: string[];
+  token_spend: Record<string, number>;
+  token_spend_by_provider?: Record<string, number>;
+  elapsed_ms: number | null;
+  trace: {
+    run_id: string | null;
+    started_at: string | null;
+    ended_at: string | null;
+    event_count: number;
+  };
+  in_flight: {
+    communication_id: string;
+    agent: string;
+    substep: string;
+    model?: string | null;
+  } | null;
+  last_comm: {
+    id: string;
+    agent: string;
+    substep: string;
+    parse_ok?: boolean;
+    tokens?: number | null;
+  } | null;
+}
+
 export interface ConclusionItem {
   id: string;
   name: string;
   summary: string;
   highlights?: ConclusionHighlight[];
   artifact_paths?: Record<string, string>;
+  evidence_refs?: { type: string; ref: string }[];
 }
 
 export interface ConclusionPhase {
@@ -171,6 +230,9 @@ export interface ProcessConclusions {
   decision?: string | null;
   submission_path?: string | null;
   final_report_path?: string | null;
+  workflow_complete?: boolean;
+  ml_success?: boolean;
+  ml_deficits?: string[];
   phases?: ConclusionPhase[];
 }
 
@@ -235,6 +297,7 @@ export interface RagView {
   embedding_model: string | null;
   chunk_count: number;
   crewai_knowledge_enabled: boolean;
+  explicit_rag_enabled: boolean;
   corpus_files: RagCorpusFile[];
   retrieval_query_preview: string;
   retrieved_passages: RagPassage[];

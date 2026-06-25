@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from maads.output_contracts import minimal_agent_output
 from maads.state import CrispDMState
 
 _DOMAIN_1_1: dict[str, Any] = {
@@ -104,7 +105,7 @@ def fake_llm_response(
 ) -> dict[str, Any]:
     """Return minimal JSON payloads so every agent ``act()`` path succeeds."""
     if agent_name == "pm":
-        return {"action": "advance", "target_substep": None, "reason": "ok"}
+        return minimal_agent_output("pm", state.substep)
 
     substep = state.substep
 
@@ -112,9 +113,22 @@ def fake_llm_response(
         return dict(_DOMAIN_1_1)
 
     if agent_name == "data_engineer" and substep in _DE_STATE_UPDATES:
-        return {"state_updates": _DE_STATE_UPDATES[substep], "summary": f"DE {substep}"}
+        return minimal_agent_output(
+            "data_engineer",
+            substep,
+            state_updates=_DE_STATE_UPDATES[substep],
+            summary=f"DE {substep}",
+        )
 
     if agent_name == "data_scientist" and substep in _DS_STATE_UPDATES:
-        return {"state_updates": _DS_STATE_UPDATES[substep], "summary": f"DS {substep}"}
+        return minimal_agent_output(
+            "data_scientist",
+            substep,
+            state_updates=_DS_STATE_UPDATES[substep],
+            summary=f"DS {substep}",
+        )
 
-    return {}
+    if agent_name == "storyteller" and substep == "6.2":
+        return minimal_agent_output("storyteller", substep, summary=f"Storyteller {substep}")
+
+    return minimal_agent_output(agent_name, substep, summary=f"{agent_name} {substep}")

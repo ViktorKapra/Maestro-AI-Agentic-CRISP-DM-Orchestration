@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from maads.outcome import ml_outcome_deficits, ml_run_succeeded, workflow_complete
 from maads.state import (
     SUBSTEP_NAMES,
     CrispDMState,
@@ -38,6 +39,8 @@ def build_conclusions_summary(state: CrispDMState) -> dict[str, Any]:
             "cv_score": md.chosen_model.cv_score,
             "assessment": md.chosen_model.assessment,
         }
+        if md.chosen_model.evaluation_bundle:
+            chosen["evaluation_metrics"] = md.chosen_model.evaluation_bundle.metrics
     phases = _phase_conclusions(state)
     return {
         "business_objectives": bu.business_objectives,
@@ -52,6 +55,9 @@ def build_conclusions_summary(state: CrispDMState) -> dict[str, Any]:
         "decision": ev.decision,
         "submission_path": dep.submission_path,
         "final_report_path": dep.final_report_path,
+        "workflow_complete": workflow_complete(state),
+        "ml_success": ml_run_succeeded(state),
+        "ml_deficits": ml_outcome_deficits(state),
         "phases": phases,
     }
 
@@ -89,6 +95,7 @@ def _item(
     summary: str,
     highlights: list[dict[str, str]] | None = None,
     artifact_paths: dict[str, str] | None = None,
+    evidence_refs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "id": substep,
@@ -99,7 +106,23 @@ def _item(
         payload["highlights"] = highlights
     if artifact_paths:
         payload["artifact_paths"] = artifact_paths
+    refs = list(evidence_refs or [])
+    refs.append({"type": "state", "ref": f"state.{_phase_key_for_substep(substep)}"})
+    payload["evidence_refs"] = refs
     return payload
+
+
+def _phase_key_for_substep(substep: str) -> str:
+    phase = substep.split(".")[0]
+    keys = {
+        "1": "bu",
+        "2": "du",
+        "3": "dp",
+        "4": "md",
+        "5": "ev",
+        "6": "dep",
+    }
+    return keys.get(phase, "bu")
 
 
 def _bu_phase(state: CrispDMState) -> list[dict[str, Any]]:
@@ -367,13 +390,18 @@ def _md_phase(state: CrispDMState) -> list[dict[str, Any]]:
 
     if md.chosen_model:
         cm = md.chosen_model
+        highlights = [
+            ("CV score", _fmt_value(cm.cv_score)),
+            ("Assessment", cm.assessment),
+        ]
+        if cm.evaluation_bundle and cm.evaluation_bundle.metrics:
+            acc = cm.evaluation_bundle.metrics.get("accuracy")
+            if acc is not None:
+                highlights.append(("OOF accuracy", _fmt_value(acc)))
         items.append(_item(
             "4.4",
             summary=f"Chosen model: {cm.technique}.",
-            highlights=_highlights_from(
-                ("CV score", _fmt_value(cm.cv_score)),
-                ("Assessment", cm.assessment),
-            ),
+            highlights=_highlights_from(*highlights),
         ))
 
     return items
@@ -418,21 +446,28 @@ def _dep_phase(state: CrispDMState) -> list[dict[str, Any]]:
     dep = state.dep
     items: list[dict[str, Any]] = []
 
-    if dep.deployment_plan:
-        items.append(_item("6.1", summary=dep.deployment_plan))
-    if dep.monitoring_and_maintenance_plan:
-        items.append(_item("6.2", summary=dep.monitoring_and_maintenance_plan))
-    if dep.final_report_path or dep.final_presentation_path or dep.submission_path:
+    if dep.deployment_plan or dep.submission_path:
+        items.append(_item(
+            "6.1",
+            summary=dep.deployment_plan or "Submission built.",
+            artifact_paths={"submission": dep.submission_path} if dep.submission_path else None,
+        ))
+    if dep.story_spec_path:
+        items.append(_item(
+            "6.2",
+            summary="Report evidence and story specification generated.",
+            artifact_paths={"story_spec": dep.story_spec_path},
+        ))
+    if dep.final_report_path:
         paths = {
             k: v for k, v in {
                 "report": dep.final_report_path,
                 "presentation": dep.final_presentation_path,
-                "submission": dep.submission_path,
             }.items() if v
         }
         items.append(_item(
             "6.3",
-            summary="Final deliverables produced.",
+            summary="Final report produced.",
             artifact_paths=paths or None,
         ))
     if dep.experience_documentation:

@@ -5,9 +5,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from maads.output_contracts import schema_hint_for_agent
 from maads.state import CrispDMState, SUBSTEP_NAMES
 
-DATA_ENGINEER_OUTPUT_SCHEMA_HINT = '{\n  "assignment_id": "string",\n  "agent": "data_engineer",\n  "status": "COMPLETED|PARTIAL|REVISION_REQUIRED|BLOCKED|HANDOFF_REQUIRED",\n  "summary": "string",\n  "state_updates": {\n    "du": {\n      "initial_data_collection_report": "object|null",\n      "data_description_report": "object|null",\n      "data_quality_report": "object|null"\n    },\n    "dp": {\n      "rationale_for_inclusion_exclusion": "object|null",\n      "data_cleaning_report": "object|null",\n      "derived_attributes": "object|null",\n      "generated_records": "object|null",\n      "merged_data": "object|null",\n      "reformatted_data": "object|null",\n      "dataset": "object|null",\n      "dataset_description": "string|null"\n    }\n  },\n  "evidence": [{"evidence_id": "string", "claim": "string", "source": "string", "method": "string"}],\n  "decisions": [{"decision_id": "string", "decision": "string", "rationale": "string", "evidence_ids": ["string"], "affected_fields": ["string"]}],\n  "operations": [{"operation_id": "string", "operation": "string", "operation_kind": "DETERMINISTIC|LEARNED", "fit_scope": "NOT_APPLICABLE|TRAIN_PARTITION_ONLY|TRAIN_FOLD_ONLY", "status": "EXECUTED|SKIPPED|FAILED", "input_artifacts": ["string"], "output_artifacts": ["string"], "evidence": "string"}],\n  "quality_findings": [{"finding_id": "string", "severity": "INFO|LOW|MEDIUM|HIGH|BLOCKING", "category": "string", "affected_fields": ["string"], "evidence": "string", "interpretation": "string", "decision": "string"}],\n  "validations": [{"validation_id": "string", "check": "string", "status": "PASS|WARNING|FAIL|NOT_RUN", "evidence": "string"}],\n  "artifacts": [{"artifact_id": "string", "artifact_type": "string", "path": "string", "version": "string", "fingerprint": "string|null", "source_lineage": ["string"], "intended_use": "string", "validation_status": "string"}],\n  "assumptions": [{"assumption_id": "string", "statement": "string", "evidence": "string", "risk_if_wrong": "string", "confirmation_owner": "string"}],\n  "risks": [{"risk_id": "string", "severity": "string", "description": "string", "mitigation": "string", "owner": "string"}],\n  "blockers": [{"blocker_id": "string", "description": "string", "missing_requirement": "string", "requested_owner": "string"}],\n  "handoffs": [{"target_role": "string", "reason": "string", "requested_action": "string", "supporting_artifacts": ["string"]}],\n  "loop_signal": {"recommended": false, "contour": "NONE|A_2_TO_1|B_4_TO_3", "reason": "string|null", "evidence_ids": ["string"]},\n  "completion_evidence": {\n    "input_contract_valid": true,\n    "required_outputs_present": true,\n    "execution_succeeded": true,\n    "artifacts_verified": true,\n    "leakage_checks_passed": true,\n    "reproducibility_checks_passed": true,\n    "safe_for_downstream_use": true\n  }\n}'
+DATA_ENGINEER_OUTPUT_SCHEMA_HINT = schema_hint_for_agent("data_engineer")
 
 _SUBSTEP_ASSIGNMENTS: dict[str, dict[str, Any]] = {
     "2.1": {
@@ -126,8 +127,6 @@ def _inputs_for_task(
         "domain_evidence": _domain_evidence(state),
         "revision_feedback": None,
         "data_mining_goals": state.bu.data_mining_goals,
-        "existing_data_understanding": state.du.model_dump(exclude_none=True),
-        "existing_data_preparation": state.dp.model_dump(exclude_none=True),
     }
     if execution_evidence:
         inputs["execution_evidence"] = execution_evidence
@@ -147,8 +146,6 @@ def format_data_engineer_task(
     runtime_input = {
         "assignment": assignment,
         "inputs": inputs,
-        "state_view": state.view_for("data_engineer"),
-        "artifact_directory": str(artifact_dir.resolve()),
     }
     instruction = (
         "Complete the assigned CRISP-DM substep using the runtime input below. "

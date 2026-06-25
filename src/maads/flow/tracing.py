@@ -84,8 +84,11 @@ def trace_substep_dispatch(state, substep: str) -> None:
 
 
 def trace_substep_end(substep: str) -> None:
+    from maads.run_status import record_substep_done
+
     coll = get_collector()
-    coll.emit_end("substep.dispatch", span_key=f"substep.{substep}")
+    coll.emit_end("substep.end", span_key=f"substep.{substep}", attributes={"substep": substep})
+    record_substep_done(substep)
     ctx.current_substep.set(None)
     ctx.current_maads_agent.set(None)
 

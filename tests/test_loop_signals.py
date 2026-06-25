@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from maads.agents import DataEngineerAgent
+from maads.agents import DataEngineerAgent, DataScientistAgent
 from maads.config import load_case_config
 from maads.deltas import Plan
 from maads.flow.phase_runner import apply_loop, validate_phase_exit
+from maads.output_contracts import minimal_agent_output
 from maads.paths import resolve_path
-from maads.state import CrispDMState, Phase
+from maads.state import CrispDMState, ModelRun, Phase
 from maads.testing.flow_harness import make_run_context
 
 
@@ -92,6 +94,51 @@ def test_suggested_action_loop_b_on_validator_findings(state: CrispDMState):
     suggested = state._suggested_pm_action()
     assert suggested is not None
     assert suggested["loop_label"] == "B"
+
+
+def test_business_goal_met_unknown_at_5_1_before_assessment(state: CrispDMState):
+    thr = state.config.success_criterion.threshold
+    state.substep = "5.1"
+    state.md.chosen_model = ModelRun(
+        technique="gradient_boosting",
+        cv_score=thr + 0.05,
+        description="strong model",
+    )
+    state.ev.assessment_of_dm_results = None
+    pm_view = state.view_for("pm")
+    assert pm_view["business_goal_met"] is None
+    assert state._suggested_pm_action() is None
+
+
+def test_business_goal_met_derived_from_cv_at_5_2_without_assessment(state: CrispDMState):
+    thr = state.config.success_criterion.threshold
+    state.substep = "5.2"
+    state.md.chosen_model = ModelRun(
+        technique="gradient_boosting",
+        cv_score=thr + 0.05,
+        description="strong model",
+    )
+    state.ev.assessment_of_dm_results = None
+    pm_view = state.view_for("pm")
+    assert pm_view["business_goal_met"] is True
+
+
+def test_ds_5_1_sets_assessment_from_chosen_model(tmp_path: Path, state: CrispDMState):
+    thr = state.config.success_criterion.threshold
+    state.phase = Phase.EVALUATION
+    state.substep = "5.1"
+    state.md.chosen_model = ModelRun(
+        technique="gradient_boosting",
+        cv_score=thr + 0.05,
+        description="strong model",
+    )
+    ds = DataScientistAgent(artifact_dir=tmp_path)
+    payload = minimal_agent_output("data_scientist", "5.1", summary="DS 5.1")
+    with patch.object(ds._crew, "kickoff_substep", return_value=payload):
+        ds.act(state)
+    assessment = state.ev.assessment_of_dm_results or {}
+    assert assessment.get("meets") is True
+    assert assessment.get("cv_score") == thr + 0.05
 
 
 def test_inspect_dataset_reports_column_diff(state: CrispDMState, tmp_path: Path):

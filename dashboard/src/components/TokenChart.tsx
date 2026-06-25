@@ -17,11 +17,12 @@ const AGENT_COLORS: Record<string, string> = {
   data_engineer: "#06b6d4",
   data_scientist: "#f59e0b",
   developer: "#22c55e",
+  storyteller: "#a855f7",
 };
 
 interface Props {
   summary: CommunicationsSummary | undefined;
-  communications: CommunicationRecord[] | undefined;
+  communications?: CommunicationRecord[] | undefined;
   tokenSpend: Record<string, number> | undefined;
 }
 

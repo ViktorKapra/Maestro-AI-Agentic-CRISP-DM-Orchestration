@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from maads.deltas import Plan
+from maads.flow.tracing import trace_substep_dispatch, trace_substep_end
 from maads.shutdown import INTERRUPT_HALT_REASON, shutdown_requested
 from maads.state import SUBSTEPS, SUBSTEP_OWNER, CrispDMState, Phase
+from maads.outcome import completion_halt_reason
 from maads.validators import validate_phase_3_artifacts, validate_phase_4_models
 
 MAX_PHASE_TRANSITIONS = 12
@@ -97,18 +99,30 @@ def resolve_plan(ctx: RunContext) -> Plan:
     return plan
 
 
-def run_substep(ctx: RunContext, substep: str) -> None:
+def run_substep(ctx: RunContext, substep: str) -> bool:
+    """Run one substep. Return False when dispatch failed or agent reported failure."""
     if not ctx.state.substep_prereqs_satisfied(substep):
         ctx.state.append_log(
             "orchestrator",
             f"prereqs not satisfied for {substep}; skipping",
             level="warn",
         )
-        return
+        return True
     owner = SUBSTEP_OWNER[substep]
     delta = ctx.agents[owner].act(ctx.state)
     detail = ", ".join(delta.fields_written) or delta.notes
-    ctx.state.append_log(owner, f"ran {substep} -> {detail}")
+    level = "warn" if delta.failed else "info"
+    ctx.state.append_log(owner, f"ran {substep} -> {detail}", level=level)
+    return not delta.failed
+
+
+def execute_substep(ctx: RunContext, substep: str) -> bool:
+    """Run one substep and emit trace events for dashboard dispatch edges."""
+    trace_substep_dispatch(ctx.state, substep)
+    try:
+        return run_substep(ctx, substep)
+    finally:
+        trace_substep_end(substep)
 
 
 def apply_loop(
@@ -119,7 +133,13 @@ def apply_loop(
 ) -> None:
     target_phase = int(plan.loop_to_phase)  # type: ignore[arg-type]
     label = plan.loop_label or "?"
-    ctx.state.record_loop(label, int(ctx.state.phase), target_phase, plan.reason)
+    from_phase = int(ctx.state.phase)
+    ctx.state.record_loop(label, from_phase, target_phase, plan.reason)
+    from maads.flow.tracing import trace_loop
+    from maads.progress import on_loop
+
+    trace_loop(label, from_phase, target_phase, plan.reason)
+    on_loop(label, target_phase, plan.reason)
     if label == "B":
         ctx.inner_loop_count += 1
     ctx.state.phase = Phase(target_phase)
@@ -175,7 +195,7 @@ def advance_substep(ctx: RunContext) -> bool:
     next_phase = int(phase) + 1
     if next_phase > int(Phase.DEPLOYMENT):
         ctx.state.halted = True
-        ctx.state.halt_reason = "completed phase 6"
+        ctx.state.halt_reason = completion_halt_reason(ctx.state)
         ctx.state.append_log("orchestrator", "run complete: phase 6 finished")
         return True
     ctx.state.phase = Phase(next_phase)
@@ -195,6 +215,20 @@ def can_fire_loop(ctx: RunContext, plan: Plan) -> bool:
     if ctx.phase_visits.get(target, 0) >= MAX_VISITS_PER_PHASE:
         return False
     return True
+
+
+def loop_block_reason(ctx: RunContext, plan: Plan) -> str:
+    """Explain why ``can_fire_loop`` would reject this plan."""
+    if caps_exceeded(ctx):
+        return "hard cap exceeded"
+    if plan.loop_label == "B" and ctx.inner_loop_count >= MAX_INNER_LOOP_ITERATIONS:
+        return "inner Loop B budget exhausted"
+    target = plan.loop_to_phase
+    if target is None:
+        return "loop_to_phase is missing"
+    if ctx.phase_visits.get(target, 0) >= MAX_VISITS_PER_PHASE:
+        return f"phase {target} visit cap exhausted"
+    return "recovery budget exhausted"
 
 
 def caps_exceeded(ctx: RunContext) -> bool:
@@ -281,8 +315,10 @@ def handle_plan(
         if plan.loop_to_phase and can_fire_loop(ctx, plan):
             apply_loop(ctx, plan)
             return loop_route_for_phase(int(plan.loop_to_phase))
-        ctx.state.append_log("orchestrator", "loop blocked by guard", level="warn")
-        return None
+        reason = loop_block_reason(ctx, plan)
+        ctx.state.append_log("orchestrator", f"loop blocked by guard: {reason}", level="warn")
+        force_halt(ctx.state, f"recovery budget exhausted: {reason}")
+        return "halt"
     if (
         plan.action == "advance"
         and plan.target_substep
@@ -330,7 +366,9 @@ def run_phase_substeps(ctx: RunContext, phase: Phase) -> str | None:
                 f"mechanical advance within phase at {substep}",
             )
         try:
-            run_substep(ctx, substep)
+            if not execute_substep(ctx, substep):
+                force_halt(ctx.state, f"execution failed at {substep}")
+                return "halt"
         except Exception as exc:
             force_halt(ctx.state, f"dispatch failed at {substep}: {exc}")
             return "halt"

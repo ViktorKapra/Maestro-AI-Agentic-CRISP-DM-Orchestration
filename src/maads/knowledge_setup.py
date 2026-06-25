@@ -68,6 +68,7 @@ _AGENT_SKILLS: dict[str, list[str]] = {
     "data_engineer": ["leakage-cv-discipline", "tabular-prep", "nlp-prep"],
     "data_scientist": ["leakage-cv-discipline", "nlp-prep"],
     "developer": ["kaggle-submission-contract", "developer-debug-rubric"],
+    "storyteller": ["json-output-contract"],
 }
 
 

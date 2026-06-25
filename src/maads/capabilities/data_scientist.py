@@ -1,10 +1,12 @@
 """Data Scientist capabilities — CRISP-DM-independent execution API."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 from maads.baselines import (
+    _ASSESS_SRC,
     _EXPLORE_SRC,
     _NLP_TRAIN_SRC,
     _TRAIN_SRC,
@@ -20,7 +22,7 @@ from maads.capabilities.shared import (
     record_degraded,
     run_snippet as _run_snippet,
 )
-from maads.state import CrispDMState, ModelRun
+from maads.state import CrispDMState, EvaluationBundle, ModelRun
 
 
 def execution_evidence(
@@ -86,10 +88,11 @@ def execution_evidence(
                 "PROBLEM_TYPE": problem_type,
             },
             contract=lambda p: (
-                _has_keys(p, "technique", "cv_score")
-                or ([] if isinstance(p.get("cv_score"), (int, float)) else ["cv_score must be numeric"])
+                _has_keys(p, "technique", "cv_score", "cv_std")
+                or ([] if isinstance(p.get("cv_score"), (int, float)) and isinstance(p.get("cv_std"), (int, float))
+                    else ["cv_score and cv_std must be numeric"])
             ),
-            contract_hint="Required keys: technique (str), cv_score (float), n_features (int).",
+            contract_hint="Required keys: technique (str), cv_score (float), cv_std (float), n_features (int).",
             fallback=train_fallback,
             fallback_code=train_code,
             artifact_dir=artifact_dir,
@@ -106,7 +109,64 @@ def execution_evidence(
             },
             "degraded": res.degraded,
         }
+
+    if substep == "4.4":
+        dataset_train = state.dp.dataset.get("train")
+        if not dataset_train:
+            return {}
+        idc = state.config.id_column
+        problem_type = state.config.problem_type
+        figures_dir = str((artifact_dir / "figures").resolve())
+        class_labels = json.dumps(state.config.class_labels or {})
+        assess_fallback = lambda: _run_snippet(
+            pyexec, _ASSESS_SRC,
+            __TRAIN__=dataset_train, __TARGET__=target, __ID__=idc,
+            __PROBLEM_TYPE__=problem_type, __FIGURES_DIR__=figures_dir,
+            __CLASS_LABELS__=class_labels,
+        )
+        res = run_authored_code(
+            pyexec=pyexec, agent_name="data_scientist", state=state,
+            instruction="CRISP-DM 4.4 Assess Model: write and execute Python that reads "
+                        "TRAIN_PARQUET, uses the best model approach from 4.3, produces "
+                        "out-of-fold predictions via stratified CV, computes problem-type-appropriate "
+                        "metrics (for binary classification: accuracy, balanced accuracy, per-class "
+                        "precision/recall/F1, confusion matrix), saves figures under FIGURES_DIR, "
+                        "and prints evaluation_bundle. Use CLASS_LABELS for human-readable names.",
+            header_vars={
+                "TRAIN_PARQUET": dataset_train,
+                "TARGET": target,
+                "ID_COL": idc,
+                "PROBLEM_TYPE": problem_type,
+                "FIGURES_DIR": figures_dir,
+                "CLASS_LABELS": class_labels,
+            },
+            contract=lambda p: _has_keys(p, "evaluation_bundle"),
+            contract_hint="Required key: evaluation_bundle (dict with metrics, confusion_matrix, figures).",
+            fallback=assess_fallback,
+            fallback_code=_ASSESS_SRC,
+            artifact_dir=artifact_dir,
+        )
+        p = res.payload
+        return {
+            "evaluation_bundle": p.get("evaluation_bundle"),
+            "assessment": p.get("assessment"),
+            "degraded": res.degraded,
+        }
     return {}
+
+
+_DS_EXECUTION_AUTHORITY_KEYS: dict[str, tuple[str, ...]] = {
+    "2.3": ("data_exploration_report",),
+    "4.3": ("model_run",),
+    "4.4": ("evaluation_bundle",),
+}
+
+
+def _execution_authoritative(execution: dict[str, Any], substep: str) -> bool:
+    return any(
+        execution.get(key) is not None
+        for key in _DS_EXECUTION_AUTHORITY_KEYS.get(substep, ())
+    )
 
 
 def apply_response(
@@ -116,6 +176,16 @@ def apply_response(
     execution: dict[str, Any],
 ) -> StateDelta:
     """Map data-scientist JSON (or execution fallback) into shared state."""
+    from maads.output_contracts import validate_agent_output
+
+    if not _execution_authoritative(execution, substep):
+        schema_errors = validate_agent_output("data_scientist", data, substep=substep)
+        if schema_errors:
+            return StateDelta(
+                notes=f"DS {substep}: schema-invalid response: {schema_errors[0]}",
+                failed=True,
+            )
+
     su = (data or {}).get("state_updates") or {}
     du = su.get("du") or {}
     md = su.get("md") or {}
@@ -152,6 +222,7 @@ def apply_response(
         state.md.models.append(ModelRun(
             technique=technique,
             cv_score=run.get("cv_score"),
+            cv_std=run.get("cv_std"),
             description=run.get("description") or "model run",
             parameter_settings=run.get("parameter_settings") or {},
         ))
@@ -165,6 +236,7 @@ def apply_response(
             )
             record_degraded(state, substep, "data_scientist", "4.3 baseline fallback")
     elif substep == "4.4":
+        bundle_raw = execution.get("evaluation_bundle")
         if state.md.models:
             best = max(state.md.models, key=lambda m: m.cv_score or 0.0)
             chosen = md.get("chosen_model_technique")
@@ -173,9 +245,24 @@ def apply_response(
                     if m.technique == chosen:
                         best = m
                         break
-            best.assessment = md.get("assessment") or "selected: best CV score"
+            best.assessment = (
+                execution.get("assessment")
+                or md.get("assessment")
+                or "selected: best CV score"
+            )
+            if bundle_raw:
+                best.evaluation_bundle = EvaluationBundle.model_validate(bundle_raw)
             state.md.chosen_model = best
             fields.append("md.chosen_model")
+        elif not bundle_raw:
+            return StateDelta(notes="DS 4.4: no evaluation_bundle from execution", failed=True)
+        if execution.get("degraded"):
+            state.append_log(
+                "data_scientist",
+                "4.4 assessment degraded to baseline fallback",
+                level="warn",
+            )
+            record_degraded(state, substep, "data_scientist", "4.4 baseline fallback")
     elif substep == "5.1":
         cv = state.md.chosen_model.cv_score if state.md.chosen_model else None
         thr = state.config.success_criterion.threshold

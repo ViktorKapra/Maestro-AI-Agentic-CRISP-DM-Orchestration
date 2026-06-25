@@ -48,9 +48,9 @@ def test_advance_dispatches_current_substep_not_pm_target(
     dispatched: list[str] = []
     orig = pr.run_substep
 
-    def track(ctx, substep: str) -> None:
+    def track(ctx, substep: str) -> bool:
         dispatched.append(substep)
-        orig(ctx, substep)
+        return orig(ctx, substep)
 
     with patch.object(pr, "run_substep", side_effect=track):
         flow = make_flow(titanic_state, artifact_dir)
@@ -151,9 +151,9 @@ def test_phase1_domain_llm_substeps_run_in_order(
     dispatched: list[str] = []
     orig = pr.run_substep
 
-    def track(ctx, substep: str) -> None:
+    def track(ctx, substep: str) -> bool:
         dispatched.append(substep)
-        orig(ctx, substep)
+        return orig(ctx, substep)
 
     with patch.object(pr, "run_substep", side_effect=track):
         flow = make_flow(titanic_state, artifact_dir)
@@ -199,8 +199,9 @@ def test_mechanical_advance_skips_pm_llm_between_decision_points(
             return Plan(action="halt", reason="stop")
         return Plan(action="advance", reason="ok")
 
-    def track(ctx, substep: str) -> None:
+    def track(ctx, substep: str) -> bool:
         dispatched.append(substep)
+        return True
 
     with patch.object(pr, "run_substep", side_effect=track):
         flow = make_flow(titanic_state, artifact_dir)
@@ -224,7 +225,7 @@ def test_pm_llm_called_at_each_decision_substep(
         pm_calls.append(state.substep)
         return Plan(action="advance", reason="ok")
 
-    with patch.object(pr, "run_substep", lambda *_a, **_k: None):
+    with patch.object(pr, "run_substep", lambda *_a, **_k: True):
         flow = make_flow(titanic_state, artifact_dir)
         flow._pm.plan = track_plan  # type: ignore[method-assign]
         flow.run()

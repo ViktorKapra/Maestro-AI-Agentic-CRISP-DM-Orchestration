@@ -1,6 +1,7 @@
 """Developer DEBUG mode — on-call repair for PythonExec and JSON parse failures."""
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Any, Callable
 
 from maads.codegen import Contract, _extract_code, _header, _last_json_line
 from maads.crew import CrewKickoffError, _extract_json
+from maads.prompts import JSON_EXPECTED_OUTPUT
 from maads.prompts.identities.developer import format_developer_debug_task
 from maads.state import CrispDMState
 from maads.tools import ExecResult, PythonExec
@@ -24,6 +26,9 @@ class DebugOutcome:
     code: str | None = None
     diagnosis: dict[str, Any] = field(default_factory=dict)
     fix_attempts: list[dict[str, Any]] = field(default_factory=list)
+    repair_kind: str = "none"
+    schema_ok: bool = False
+    schema_errors: list[str] = field(default_factory=list)
 
 
 def classify_exec_error(res: ExecResult | None, error_text: str = "") -> str:
@@ -232,52 +237,92 @@ def debug_json_parse(
     raw_text: str,
     schema_hint: str = "",
     instruction: str = "",
+    failure_kind: str = "json_parse",
+    invalid_payload: dict[str, Any] | None = None,
 ) -> DebugOutcome:
     """Developer repairs malformed structured output from another agent."""
+    from maads.output_contracts import validate_agent_output
+
     text = (raw_text or "").strip()
-    if not text:
+    if not text and invalid_payload is None:
         return DebugOutcome(
             status="STUCK",
             diagnosis={"error_class": "json_parse", "root_cause": "empty LLM output"},
         )
 
-    # Deterministic repair pass (same helpers as crew.run_json_task).
-    parsed = _extract_json(text)
-    if parsed is not None:
-        state.append_log(
-            "developer",
-            f"DEBUG repaired JSON for {requesting_agent} deterministically",
+    def _validated(payload: dict[str, Any] | None, repair_kind: str) -> DebugOutcome:
+        if payload is None:
+            return DebugOutcome(
+                status="STUCK",
+                repair_kind=repair_kind,
+                diagnosis={"error_class": failure_kind, "root_cause": "no parseable JSON"},
+            )
+        errors = validate_agent_output(
+            requesting_agent, payload, substep=state.substep,
         )
+        if errors:
+            return DebugOutcome(
+                status="STUCK",
+                payload=payload,
+                repair_kind=repair_kind,
+                schema_ok=False,
+                schema_errors=errors,
+                diagnosis={
+                    "error_class": "json_schema",
+                    "root_cause": "; ".join(errors[:3]),
+                },
+            )
         return DebugOutcome(
             status="FIXED",
-            payload=parsed,
-            diagnosis={"error_class": "json_parse", "root_cause": "deterministic repair"},
-            fix_attempts=[{
+            payload=payload,
+            repair_kind=repair_kind,
+            schema_ok=True,
+            diagnosis={"error_class": failure_kind, "root_cause": repair_kind},
+        )
+
+    # Deterministic repair pass (same helpers as crew.run_json_task).
+    source_text = text
+    if failure_kind == "json_schema" and invalid_payload is not None:
+        source_text = json.dumps(invalid_payload)
+    parsed = _extract_json(source_text) if source_text else invalid_payload
+    if parsed is not None and failure_kind == "json_parse":
+        outcome = _validated(parsed, "deterministic")
+        if outcome.status == "FIXED":
+            state.append_log(
+                "developer",
+                f"DEBUG repaired JSON for {requesting_agent} deterministically",
+            )
+            outcome.fix_attempts = [{
                 "attempt": 0,
                 "change": "deterministic json repair",
                 "exec_status": "EXECUTED",
-            }],
-        )
+            }]
+            return outcome
 
     state.append_log(
         "developer",
-        f"DEBUG json_parse for {requesting_agent} @ {state.substep}",
+        f"DEBUG {failure_kind} for {requesting_agent} @ {state.substep}",
         level="warn",
     )
 
+    malformed = _excerpt(source_text or json.dumps(invalid_payload or {}), 4000)
     debug_instruction = format_developer_debug_task(
         state,
         artifact_dir,
-        failure_kind="json_parse",
+        failure_kind=failure_kind,
         requesting_agent=requesting_agent,
-        error_class="json_parse",
-        last_error="upstream agent returned non-JSON or invalid JSON",
+        error_class=failure_kind,
+        last_error=(
+            "upstream agent returned schema-invalid JSON"
+            if failure_kind == "json_schema"
+            else "upstream agent returned non-JSON or invalid JSON"
+        ),
         stderr_excerpt="",
         failing_code="",
         header_var_names=[],
         contract_hint=schema_hint,
         schema_columns=_schema_columns(state),
-        malformed_json=_excerpt(text, 4000),
+        malformed_json=malformed,
         task_instruction=instruction,
         attempt=1,
         max_retries=1,
@@ -289,42 +334,47 @@ def debug_json_parse(
             "developer",
             debug_instruction,
             state,
-            expected_output="A single valid JSON object.",
+            expected_output=JSON_EXPECTED_OUTPUT,
         )
     except (CrewKickoffError, RuntimeError) as exc:
         return DebugOutcome(
             status="STUCK",
+            repair_kind="developer_llm",
             diagnosis={
-                "error_class": "json_parse",
+                "error_class": failure_kind,
                 "root_cause": f"developer LLM failed: {exc}",
             },
         )
 
     repaired = _extract_json(raw)
     if repaired is None:
-        # Last resort: grab first balanced object from developer prose.
         repaired = _extract_json(re.sub(r"^[^{]*", "", raw, count=1))
 
-    if repaired is not None:
+    outcome = _validated(repaired, "developer_llm")
+    if outcome.status == "FIXED":
         state.append_log(
             "developer",
             f"DEBUG repaired JSON for {requesting_agent} via developer LLM",
         )
-        return DebugOutcome(
-            status="FIXED",
-            payload=repaired,
-            diagnosis={"error_class": "json_parse", "root_cause": "developer LLM repair"},
-            fix_attempts=[{
-                "attempt": 1,
-                "change": "developer json repair",
-                "exec_status": "EXECUTED",
-            }],
-        )
+        outcome.fix_attempts = [{
+            "attempt": 1,
+            "change": "developer json repair",
+            "exec_status": "EXECUTED",
+        }]
+        return outcome
 
     return DebugOutcome(
         status="STUCK",
+        payload=repaired,
+        repair_kind="developer_llm",
+        schema_ok=False,
+        schema_errors=outcome.schema_errors,
         diagnosis={
-            "error_class": "json_parse",
-            "root_cause": "developer could not repair malformed JSON",
+            "error_class": failure_kind,
+            "root_cause": (
+                outcome.schema_errors[0]
+                if outcome.schema_errors
+                else "developer could not repair malformed JSON"
+            ),
         },
     )

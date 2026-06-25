@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from maads.config import load_case_config
-from maads.deltas import Plan
+from maads.deltas import Plan, StateDelta
 from maads.flow.phase_runner import (
     RunContext,
     advance_substep,
@@ -15,11 +15,14 @@ from maads.flow.phase_runner import (
     can_fire_loop,
     deployment_review_pending,
     force_halt,
+    handle_plan,
+    loop_block_reason,
     resolve_plan,
     run_substep,
 )
+from maads.outcome import completion_halt_reason, ml_outcome_deficits
 from maads.paths import resolve_path
-from maads.state import CrispDMState, Phase
+from maads.state import CrispDMState, ModelRun, Phase
 
 
 @pytest.fixture
@@ -95,3 +98,53 @@ def test_force_halt_sets_state(titanic_state: CrispDMState):
     force_halt(titanic_state, "test halt")
     assert titanic_state.halted is True
     assert titanic_state.halt_reason == "test halt"
+
+
+def test_run_substep_fails_on_agent_failure(titanic_state: CrispDMState, tmp_path: Path):
+    ctx = _ctx(titanic_state, tmp_path)
+    titanic_state.phase = Phase.MODELING
+    titanic_state.substep = "4.1"
+    titanic_state.dp.dataset = {"train": "x", "test": "y"}
+    ctx.agents["data_scientist"].act.return_value = StateDelta(
+        notes="DS 4.3 execution failed: boom",
+        failed=True,
+    )
+    assert run_substep(ctx, "4.1") is False
+
+
+def test_loop_block_reason_inner_cap(titanic_state: CrispDMState, tmp_path: Path):
+    ctx = _ctx(titanic_state, tmp_path)
+    ctx.inner_loop_count = 3
+    plan = Plan(action="loop_back", loop_to_phase=3, loop_label="B", reason="x")
+    assert loop_block_reason(ctx, plan) == "inner Loop B budget exhausted"
+
+
+def test_handle_plan_halts_on_blocked_loop(titanic_state: CrispDMState, tmp_path: Path):
+    ctx = _ctx(titanic_state, tmp_path)
+    ctx.inner_loop_count = 3
+    plan = Plan(action="loop_back", loop_to_phase=3, loop_label="B", reason="retry prep")
+    route = handle_plan(ctx, plan)
+    assert route == "halt"
+    assert titanic_state.halted
+    assert "recovery budget exhausted" in (titanic_state.halt_reason or "")
+
+
+def test_completion_halt_reason_without_ml_success(titanic_state: CrispDMState):
+    titanic_state.phase = Phase.DEPLOYMENT
+    titanic_state.substep = "6.4"
+    titanic_state.halted = True
+    reason = completion_halt_reason(titanic_state)
+    assert "without ML success" in reason
+    assert set(ml_outcome_deficits(titanic_state)) >= {
+        "no chosen_model",
+        "no submission_path",
+        "business success criteria not met",
+    }
+
+
+def test_completion_halt_reason_on_full_success(titanic_state: CrispDMState, tmp_path: Path):
+    run = ModelRun(technique="rf", cv_score=0.82, assessment="ok")
+    titanic_state.md.chosen_model = run
+    titanic_state.dep.submission_path = str(tmp_path / "submission.csv")
+    titanic_state.ev.assessment_of_dm_results = {"meets": True}
+    assert completion_halt_reason(titanic_state) == "completed phase 6"

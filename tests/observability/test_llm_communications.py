@@ -146,7 +146,8 @@ def test_render_communications_markdown():
     assert '"a": 1' in md
 
 
-def test_write_communication_artifacts(tmp_path: Path):
+def test_write_communication_artifacts(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("MAADS_WRITE_RENDERS", "1")
     reg = reset_communication_registry()
     comm_id = reg.open_record(
         run_id="r",
@@ -156,17 +157,21 @@ def test_write_communication_artifacts(tmp_path: Path):
         maads={"task_description": "plan"},
     )
     reg.close_record(comm_id, raw_response="{}", parsed_json={}, parse_ok=True)
-    write_communication_artifacts(reg, tmp_path)
-    assert (tmp_path / "communications.jsonl").exists()
-    assert (tmp_path / "communications.md").exists()
-    assert (tmp_path / "communications_summary.json").exists()
-    lines = (tmp_path / "communications.jsonl").read_text().strip().splitlines()
+    out = tmp_path / "trace"
+    write_communication_artifacts(reg, out)
+    collected = tmp_path / "collected" / "communications.jsonl"
+    assert collected.is_file()
+    assert (out / "communications.jsonl").is_file()
+    assert (out / "communications.md").is_file()
+    summary = tmp_path / "derived" / "communications_summary.json"
+    assert summary.is_file()
+    lines = collected.read_text().strip().splitlines()
     assert len(lines) == 1
     row = json.loads(lines[0])
     assert row["agent_name"] == "pm"
-    summary = json.loads((tmp_path / "communications_summary.json").read_text())
-    assert summary["turn_count"] == 1
-    assert summary["by_agent"]["pm"]["turns"] == 1
+    summary_data = json.loads(summary.read_text())
+    assert summary_data["turn_count"] == 1
+    assert summary_data["by_agent"]["pm"]["turns"] == 1
 
 
 def test_build_communications_summary():
@@ -180,6 +185,65 @@ def test_build_communications_summary():
     assert summary["turn_count"] == 1
     assert summary["parse_failures"] == 1
     assert summary["by_agent"]["pm"]["prompt_chars"] == 3
+
+
+def test_resolve_comm_id_prefers_agent_role_with_multiple_open():
+    reg = reset_communication_registry()
+    de_id = reg.open_record(
+        run_id="r",
+        case_id="titanic",
+        substep="2.4",
+        agent_name="data_engineer",
+        role="Senior Data Engineer",
+        maads={"task_description": "de task"},
+    )
+    dev_id = reg.open_record(
+        run_id="r",
+        case_id="titanic",
+        substep="2.4",
+        agent_name="developer",
+        role="Senior Developer & On-Call Debugger",
+        maads={"task_description": "debug task"},
+        parent_comm_id=de_id,
+    )
+    linked = reg.enrich_start(
+        call_id="developer-call-1",
+        agent_role="Senior Developer & On-Call Debugger",
+        messages=[{"role": "user", "content": "debug"}],
+    )
+    assert linked == dev_id
+    de_linked = reg.enrich_start(
+        call_id="de-call-1",
+        agent_role="Senior Data Engineer",
+        messages=[{"role": "user", "content": "de"}],
+    )
+    assert de_linked == de_id
+    assert de_id != dev_id
+
+
+def test_close_record_schema_fields():
+    reg = reset_communication_registry()
+    comm_id = reg.open_record(
+        run_id="r",
+        case_id=None,
+        substep="2.4",
+        agent_name="data_engineer",
+        maads={"task_description": "x"},
+    )
+    rec = reg.close_record(
+        comm_id,
+        raw_response="{}",
+        parsed_json={},
+        parse_ok=False,
+        json_valid=True,
+        schema_ok=False,
+        schema_errors=["assignment_id: expected '2.4'"],
+        repair={"kind": "developer_llm", "requesting_agent": "data_engineer", "succeeded": False},
+    )
+    assert rec is not None
+    assert rec.outcome["json_valid"] is True
+    assert rec.outcome["schema_ok"] is False
+    assert rec.outcome["parse_ok"] is False
 
 
 def test_apply_patches_replaces_agents_run_json_task(monkeypatch: pytest.MonkeyPatch):

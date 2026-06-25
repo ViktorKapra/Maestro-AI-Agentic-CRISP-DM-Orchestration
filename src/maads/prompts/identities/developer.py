@@ -5,16 +5,17 @@ import json
 from pathlib import Path
 from typing import Any
 
+from maads.output_contracts import schema_hint_for_agent
 from maads.state import CrispDMState, SUBSTEP_NAMES
 
 MAX_DEBUG_RETRIES = 3
 
-DEVELOPER_OUTPUT_SCHEMA_HINT = "{\n  \"assignment_id\": \"string\",\n  \"agent\": \"developer\",\n  \"mode\": \"string\",\n  \"status\": \"COMPLETED|PARTIAL|FIXED|REVISION_REQUIRED|BLOCKED|STUCK|HANDOFF_REQUIRED\",\n  \"summary\": \"string\",\n  \"state_updates\": {\n    \"dep\": {\n      \"deployment_plan\": \"string|null\",\n      \"submission_path\": \"path|null\",\n      \"monitoring_and_maintenance_plan\": \"string|null\",\n      \"final_report_path\": \"path|null\",\n      \"final_presentation_path\": \"path|null\",\n      \"experience_documentation\": \"string|null\"\n    }\n  },\n  \"diagnosis\": {\n    \"error_class\": \"schema_error|shape_mismatch|type_error|leakage_signal|lib_version|oom|timeout|syntax_error|json_parse|other|none\",\n    \"root_cause\": \"string|null\",\n    \"offending_columns\": [\"string\"],\n    \"smallest_fix\": \"string|null\"\n  },\n  \"fix_attempts\": [{\"attempt\": \"integer\", \"change\": \"string\", \"exec_status\": \"EXECUTED|FAILED|TIMED_OUT\", \"stdout_excerpt\": \"string\", \"stderr_excerpt\": \"string\"}],\n  \"operations\": [{\"operation_id\": \"string\", \"operation\": \"string\", \"operation_kind\": \"DETERMINISTIC|LEARNED\", \"status\": \"EXECUTED|SKIPPED|FAILED\", \"input_artifacts\": [\"string\"], \"output_artifacts\": [\"string\"], \"evidence\": \"string\"}],\n  \"validations\": [{\"validation_id\": \"string\", \"check\": \"string\", \"status\": \"PASS|WARNING|FAIL|NOT_RUN\", \"evidence\": \"string\"}],\n  \"artifacts\": [{\"artifact_id\": \"string\", \"artifact_type\": \"string\", \"path\": \"string\", \"version\": \"string\", \"fingerprint\": \"string|null\", \"source_lineage\": [\"string\"], \"intended_use\": \"string\", \"validation_status\": \"string\"}],\n  \"assumptions\": [{\"assumption_id\": \"string\", \"statement\": \"string\", \"evidence\": \"string\", \"risk_if_wrong\": \"string\", \"confirmation_owner\": \"string\"}],\n  \"risks\": [{\"risk_id\": \"string\", \"severity\": \"string\", \"description\": \"string\", \"mitigation\": \"string\", \"owner\": \"string\"}],\n  \"blockers\": [{\"blocker_id\": \"string\", \"description\": \"string\", \"missing_requirement\": \"string\", \"requested_owner\": \"string\"}],\n  \"handoffs\": [{\"target_role\": \"string\", \"reason\": \"string\", \"requested_action\": \"string\", \"supporting_artifacts\": [\"string\"]}],\n  \"loop_signal\": {\"recommended\": false, \"contour\": \"NONE|B_4_TO_3\", \"reason\": \"string|null\", \"evidence_ids\": [\"string\"]},\n  \"completion_evidence\": {\n    \"input_contract_valid\": true,\n    \"required_outputs_present\": true,\n    \"execution_succeeded\": true,\n    \"artifacts_verified\": true,\n    \"submission_schema_matches_template\": \"boolean|null\",\n    \"reproducibility_checks_passed\": true,\n    \"safe_for_downstream_use\": true\n  }\n}"
+DEVELOPER_OUTPUT_SCHEMA_HINT = schema_hint_for_agent("developer")
 
 _SUBSTEP_ASSIGNMENTS: dict[str, dict[str, Any]] = {
     "6.1": {
         "mode": "DEPLOY",
-        "objective": "Plan deployment and build a schema-valid submission.csv",
+        "objective": "Build a schema-valid submission.csv",
         "requested_outputs": [
             "dep.deployment_plan",
             "dep.submission_path"
@@ -26,28 +27,6 @@ _SUBSTEP_ASSIGNMENTS: dict[str, dict[str, Any]] = {
         "constraints": [
             "Never treat sample submission as ground-truth labels"
         ]
-    },
-    "6.2": {
-        "mode": "DEPLOY",
-        "objective": "Plan monitoring and maintenance for the deployed model",
-        "requested_outputs": [
-            "dep.monitoring_and_maintenance_plan"
-        ],
-        "completion_criteria": [
-            "Drift signals and retrain triggers specific to this model and metric"
-        ],
-        "constraints": []
-    },
-    "6.3": {
-        "mode": "DEPLOY",
-        "objective": "Produce the final report from run evidence",
-        "requested_outputs": [
-            "dep.final_report_path"
-        ],
-        "completion_criteria": [
-            "final_report.md assembled from objective, scores, loops, submission result"
-        ],
-        "constraints": []
     },
     "6.4": {
         "mode": "DEPLOY",
@@ -128,6 +107,8 @@ def format_developer_debug_task(
             "requesting_agent": requesting_agent,
             "crisp_dm_substep": state.substep,
             "case_id": state.case_id,
+            "expected_assignment_id": state.substep,
+            "expected_agent": requesting_agent,
         },
         "failure": {
             "kind": failure_kind,
@@ -144,9 +125,7 @@ def format_developer_debug_task(
             "schema_columns": schema_columns,
             "malformed_json": malformed_json or None,
             "original_task_instruction": task_instruction or None,
-            "data_description_report": state.du.data_description_report,
         },
-        "state_view": state.view_for("developer"),
         "artifact_directory": str(artifact_dir.resolve()),
     }
     if failure_kind == "python_exec":
@@ -157,8 +136,13 @@ def format_developer_debug_task(
         )
     else:
         deliverable = (
-            "Return ONLY a single valid JSON object matching the contract_hint / "
-            "original task shape. No markdown fences, no commentary."
+            f"Return ONLY the repaired {requesting_agent} substep JSON for CRISP-DM "
+            f"substep {state.substep}. assignment_id must be '{state.substep}' and "
+            f"agent must be '{requesting_agent}'. Do NOT return debug metadata "
+            "(mode, diagnosis, status=FIXED). List fields must be JSON arrays [], "
+            "never empty strings. state_updates must be an object. "
+            "Your response must begin with '{{' and end with '}}'. "
+            "Do not include markdown wraps."
         )
     return (
         "DEBUG mode — you are the on-call Developer. Diagnose the failure below, "
@@ -180,8 +164,6 @@ def format_developer_task(
     runtime_input = {
         "assignment": assignment,
         "inputs": inputs,
-        "state_view": state.view_for("developer"),
-        "artifact_directory": str(artifact_dir.resolve()),
     }
     instruction = (
         "Complete the assigned CRISP-DM substep using the runtime input below. "

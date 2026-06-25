@@ -4,6 +4,7 @@ import {
   fetchCommunications,
   fetchCommunicationsSummary,
   fetchGraph,
+  fetchLiveSummary,
   fetchProcess,
   fetchRag,
   fetchState,
@@ -26,6 +27,15 @@ export function useCases() {
   });
 }
 
+export function useLiveSummary(caseId: string | null) {
+  return useQuery({
+    queryKey: ["liveSummary", caseId],
+    queryFn: () => fetchLiveSummary(caseId!),
+    enabled: !!caseId,
+    ...pollOptions,
+  });
+}
+
 export function useStatus(caseId: string | null) {
   return useQuery({
     queryKey: ["status", caseId],
@@ -44,10 +54,13 @@ export function useTraceSummary(caseId: string | null) {
   });
 }
 
-export function useCommunications(caseId: string | null) {
+export function useCommunications(
+  caseId: string | null,
+  opts?: { sinceId?: string; limit?: number },
+) {
   return useQuery({
-    queryKey: ["communications", caseId],
-    queryFn: () => fetchCommunications(caseId!),
+    queryKey: ["communications", caseId, opts?.sinceId, opts?.limit],
+    queryFn: () => fetchCommunications(caseId!, opts),
     enabled: !!caseId,
     ...pollOptions,
   });

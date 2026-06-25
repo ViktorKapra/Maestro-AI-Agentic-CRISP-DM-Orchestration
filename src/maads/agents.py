@@ -1,4 +1,4 @@
-"""The five agents — CrewAI-backed adapter layer over capability modules."""
+"""Agent adapters — CrewAI-backed layer over capability modules."""
 from __future__ import annotations
 
 import re
@@ -10,6 +10,7 @@ from maads.crews.data_engineer_crew.data_engineer_crew import DataEngineerCrew
 from maads.crews.data_scientist_crew.data_scientist_crew import DataScientistCrew
 from maads.crews.domain_crew.domain_crew import DomainCrew
 from maads.crews.pm_crew.pm_crew import PMCrew
+from maads.crews.storyteller_crew.storyteller_crew import StorytellerCrew
 from maads.crew import CrewKickoffError, run_json_task, run_text_task  # test patch targets
 from maads.deltas import Plan, StateDelta
 from maads.state import CrispDMState
@@ -19,11 +20,14 @@ from maads.capabilities.data_engineer import apply_response as _apply_data_engin
 from maads.capabilities.data_engineer import execution_evidence as _de_execution_evidence
 from maads.capabilities.data_scientist import apply_response as _apply_data_scientist_response
 from maads.capabilities.data_scientist import execution_evidence as _ds_execution_evidence
+from maads.capabilities.shared import execution_authoritative
 from maads.capabilities.developer import (
     build_submission,
     experience_review,
-    plan_monitoring,
-    write_final_report,
+)
+from maads.capabilities.storyteller import (
+    apply_response as _apply_storyteller_response,
+    render_final_report_step,
 )
 from maads.capabilities.domain import (
     apply_refine_goals,
@@ -159,10 +163,15 @@ class DataEngineerAgent:
                 self.pyexec, state, s, self.artifact_dir,
             )
         except RuntimeError as exc:
-            return StateDelta(notes=f"DE {s} execution failed: {exc}")
+            return StateDelta(notes=f"DE {s} execution failed: {exc}", failed=True)
 
         if s in _DE_EXECUTION_SUBSTEPS and not execution:
-            return StateDelta(notes=f"DE {s}: no execution evidence produced")
+            return StateDelta(notes=f"DE {s}: no execution evidence produced", failed=True)
+
+        if s in _DE_EXECUTION_SUBSTEPS and execution_authoritative(
+            execution, s, "data_engineer",
+        ):
+            return _apply_data_engineer_response({}, state, s, execution)
 
         try:
             data = self._crew.kickoff_substep(
@@ -174,7 +183,7 @@ class DataEngineerAgent:
 
 
 _DS_OWNED_SUBSTEPS = {"2.3", "4.1", "4.2", "4.3", "4.4", "5.1"}
-_DS_EXECUTION_SUBSTEPS = {"2.3", "4.3"}
+_DS_EXECUTION_SUBSTEPS = {"2.3", "4.3", "4.4"}
 
 
 class DataScientistAgent:
@@ -196,10 +205,15 @@ class DataScientistAgent:
                 self.pyexec, state, s, self.artifact_dir,
             )
         except RuntimeError as exc:
-            return StateDelta(notes=f"DS {s} execution failed: {exc}")
+            return StateDelta(notes=f"DS {s} execution failed: {exc}", failed=True)
 
         if s in _DS_EXECUTION_SUBSTEPS and not execution:
-            return StateDelta(notes=f"DS {s}: no execution evidence produced")
+            return StateDelta(notes=f"DS {s}: no execution evidence produced", failed=True)
+
+        if s in _DS_EXECUTION_SUBSTEPS and execution_authoritative(
+            execution, s, "data_scientist",
+        ):
+            return _apply_data_scientist_response({}, state, s, execution)
 
         try:
             data = self._crew.kickoff_substep(
@@ -221,11 +235,34 @@ class DeveloperAgent:
     def act(self, state: CrispDMState) -> StateDelta:
         s = state.substep
         if s == "6.1":
-            return build_submission(self.pyexec, state, self.artifact_dir)
-        if s == "6.2":
-            return plan_monitoring(state)
-        if s == "6.3":
-            return write_final_report(self.fileio, state)
+            try:
+                return build_submission(self.pyexec, state, self.artifact_dir)
+            except RuntimeError as exc:
+                return StateDelta(notes=f"Developer 6.1 submission failed: {exc}", failed=True)
         if s == "6.4":
             return experience_review(state)
         return StateDelta(notes=f"Developer no-op for {s}")
+
+
+_STORYTELLER_OWNED_SUBSTEPS = {"6.2", "6.3"}
+
+
+class StorytellerAgent:
+    name = "storyteller"
+
+    def __init__(self, *, artifact_dir: Path) -> None:
+        self.artifact_dir = artifact_dir
+        self.fileio, self.pyexec = _tools(artifact_dir)
+        self._crew = StorytellerCrew()
+
+    def act(self, state: CrispDMState) -> StateDelta:
+        s = state.substep
+        if s not in _STORYTELLER_OWNED_SUBSTEPS:
+            return StateDelta(notes=f"Storyteller no-op for {s}")
+        if s == "6.3":
+            return render_final_report_step(state, self.artifact_dir)
+        try:
+            data = self._crew.kickoff_substep(s, state, self.artifact_dir) or {}
+        except (CrewKickoffError, RuntimeError):
+            data = {}
+        return _apply_storyteller_response(data, state, s, self.artifact_dir)

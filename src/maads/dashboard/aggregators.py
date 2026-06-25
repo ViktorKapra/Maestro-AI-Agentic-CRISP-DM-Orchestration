@@ -10,19 +10,16 @@ from maads.observability.schema import TraceEvent, TraceRun
 from maads.run_status import PHASE_NAMES
 from maads.state import SUBSTEP_NAMES, SUBSTEP_OWNER, SUBSTEPS, Phase
 
-_AGENT_IDS = ("pm", "domain", "data_engineer", "data_scientist", "developer")
+_AGENT_IDS = ("pm", "domain", "data_engineer", "data_scientist", "developer", "storyteller")
 
-_NODE_LAYOUT: dict[str, tuple[float, float]] = {
-    "orchestrator": (0, 200),
-    "pm": (220, 80),
-    "domain": (220, 160),
-    "data_engineer": (220, 240),
-    "data_scientist": (220, 320),
-    "developer": (220, 400),
-    "llm": (480, 200),
-    "python_exec": (480, 320),
-    "tool": (480, 400),
-}
+_FLOW_NODE_ID = "crisp_dm_flow"
+_FLOW_LABEL = "CrispDM Flow"
+
+_COL_FLOW = 0
+_COL_AGENTS = 300
+_COL_SERVICES = 600
+_AGENT_ROW_GAP = 96
+_SERVICE_ROW_GAP = 88
 
 _AGENT_LABELS: dict[str, str] = {
     "pm": "Project Manager",
@@ -30,6 +27,7 @@ _AGENT_LABELS: dict[str, str] = {
     "data_engineer": "Data Engineer",
     "data_scientist": "Data Scientist",
     "developer": "Developer",
+    "storyteller": "Storyteller",
 }
 
 
@@ -37,15 +35,17 @@ def filter_timeline_events(events: list[TraceEvent]) -> list[TraceEvent]:
     return [e for e in events if e.type in _TIMELINE_TYPES]
 
 
-def trace_summary(run: TraceRun) -> dict[str, Any]:
+def trace_summary(run: TraceRun, *, tail_limit: int | None = None) -> dict[str, Any]:
     filtered = filter_timeline_events(run.events)
+    if tail_limit is not None and len(filtered) > tail_limit:
+        filtered = filtered[-tail_limit:]
     return {
         "run_id": run.run_id,
         "case_id": run.case_id,
         "started_at": run.started_at.isoformat(),
         "ended_at": run.ended_at.isoformat() if run.ended_at else None,
         "total_events": len(run.events),
-        "filtered_event_count": len(filtered),
+        "filtered_event_count": len(filter_timeline_events(run.events)),
         "events": [_event_dict(e) for e in filtered],
     }
 
@@ -87,12 +87,52 @@ def _agent_from_event(evt: TraceEvent) -> str | None:
     return resolve_maads_agent_id(evt.attributes, event_name=evt.name)
 
 
+def _stack_positions(ids: list[str], x: float, gap: float) -> dict[str, tuple[float, float]]:
+    """Vertically center a column of nodes around y=200."""
+    if not ids:
+        return {}
+    span = (len(ids) - 1) * gap
+    start_y = 200 - span / 2
+    return {node_id: (x, start_y + i * gap) for i, node_id in enumerate(ids)}
+
+
+def _graph_layout(
+    agents_seen: set[str],
+    *,
+    has_llm: bool,
+    has_py: bool,
+    has_tool: bool,
+) -> dict[str, tuple[float, float]]:
+    ordered_agents = [a for a in _AGENT_IDS if a in agents_seen]
+    positions = _stack_positions(ordered_agents, _COL_AGENTS, _AGENT_ROW_GAP)
+
+    services: list[str] = []
+    if has_llm:
+        services.append("llm")
+    if has_py:
+        services.append("python_exec")
+    if has_tool:
+        services.append("tool")
+    positions.update(_stack_positions(services, _COL_SERVICES, _SERVICE_ROW_GAP))
+
+    if ordered_agents:
+        agent_ys = [positions[a][1] for a in ordered_agents]
+        flow_y = sum(agent_ys) / len(agent_ys)
+    elif services:
+        service_ys = [positions[s][1] for s in services]
+        flow_y = sum(service_ys) / len(service_ys)
+    else:
+        flow_y = 200.0
+    positions[_FLOW_NODE_ID] = (_COL_FLOW, flow_y)
+    return positions
+
+
 def build_graph(run: TraceRun) -> dict[str, Any]:
     """Build React Flow nodes and edges from trace events."""
     agents_seen: set[str] = set()
     dispatch_edges: set[tuple[str, str]] = set()
     interaction_edges: list[dict[str, Any]] = []
-    node_states: dict[str, str] = {"orchestrator": "idle"}
+    node_states: dict[str, str] = {_FLOW_NODE_ID: "idle"}
     active_llm_by_agent: dict[str, str] = {}
     open_llm_comm: str | None = None
 
@@ -108,7 +148,7 @@ def build_graph(run: TraceRun) -> dict[str, Any]:
             node_states.setdefault(agent_id, "idle")
 
         if evt.type == "substep.dispatch" and agent_id:
-            dispatch_edges.add(("orchestrator", agent_id))
+            dispatch_edges.add((_FLOW_NODE_ID, agent_id))
             node_states[agent_id] = "active"
             current_agent = agent_id
             for aid in agents_seen:
@@ -185,15 +225,18 @@ def build_graph(run: TraceRun) -> dict[str, Any]:
             if current_agent:
                 node_states[current_agent] = "error"
 
+    layout = _graph_layout(agents_seen, has_llm=has_llm, has_py=has_py, has_tool=has_tool)
+    flow_pos = layout[_FLOW_NODE_ID]
+
     nodes: list[dict[str, Any]] = [{
-        "id": "orchestrator",
-        "type": "agentNode",
-        "position": {"x": _NODE_LAYOUT["orchestrator"][0], "y": _NODE_LAYOUT["orchestrator"][1]},
-        "data": {"label": "Orchestrator", "state": node_states.get("orchestrator", "idle")},
+        "id": _FLOW_NODE_ID,
+        "type": "flowNode",
+        "position": {"x": flow_pos[0], "y": flow_pos[1]},
+        "data": {"label": _FLOW_LABEL, "state": node_states.get(_FLOW_NODE_ID, "idle")},
     }]
 
     for agent_id in sorted(agents_seen):
-        pos = _NODE_LAYOUT.get(agent_id, (220, 200))
+        pos = layout.get(agent_id, (_COL_AGENTS, 200))
         nodes.append({
             "id": agent_id,
             "type": "agentNode",
@@ -205,24 +248,27 @@ def build_graph(run: TraceRun) -> dict[str, Any]:
         })
 
     if has_llm:
+        pos = layout["llm"]
         nodes.append({
             "id": "llm",
             "type": "serviceNode",
-            "position": {"x": _NODE_LAYOUT["llm"][0], "y": _NODE_LAYOUT["llm"][1]},
+            "position": {"x": pos[0], "y": pos[1]},
             "data": {"label": "LLM", "state": "active" if open_llm_comm else "idle"},
         })
     if has_py:
+        pos = layout["python_exec"]
         nodes.append({
             "id": "python_exec",
             "type": "serviceNode",
-            "position": {"x": _NODE_LAYOUT["python_exec"][0], "y": _NODE_LAYOUT["python_exec"][1]},
+            "position": {"x": pos[0], "y": pos[1]},
             "data": {"label": "PythonExec", "state": "idle"},
         })
     if has_tool:
+        pos = layout["tool"]
         nodes.append({
             "id": "tool",
             "type": "serviceNode",
-            "position": {"x": _NODE_LAYOUT["tool"][0], "y": _NODE_LAYOUT["tool"][1]},
+            "position": {"x": pos[0], "y": pos[1]},
             "data": {"label": "Tool", "state": "idle"},
         })
 

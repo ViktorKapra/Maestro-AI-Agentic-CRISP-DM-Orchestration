@@ -1,13 +1,16 @@
 """Central trace event collector."""
 from __future__ import annotations
 
+import json
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from maads.observability.context import current_event_id, current_run_id
+from maads.artifact_config import trace_incremental, trace_otel_enabled
+from maads.observability.context import current_event_id, current_run_id, export_dir
 from maads.observability.schema import TraceEvent, TraceRun
 
 _counter = 0
@@ -32,6 +35,7 @@ class TraceCollector:
         self._open_spans: dict[str, tuple[float, TraceEvent]] = {}
         self._span_parents: dict[str, str | None] = {}
         self._otel_span_map: dict[int, str] = {}
+        self._events_appended: int = 0  # reserved for future compaction
 
     @property
     def run(self) -> TraceRun | None:
@@ -63,6 +67,8 @@ class TraceCollector:
     ) -> str:
         if self._run is None:
             return ""
+        if not trace_otel_enabled() and event_type.startswith("otel."):
+            return ""
 
         evt_id = _next_event_id()
         parent = parent_id if parent_id is not None else current_event_id.get()
@@ -80,6 +86,7 @@ class TraceCollector:
         )
         with self._lock:
             self._run.events.append(evt)
+        self._maybe_append_event(evt)
         if span_key:
             self._open_spans[span_key] = (time.monotonic(), evt)
         return evt_id
@@ -142,6 +149,18 @@ class TraceCollector:
             if self._run is None:
                 return TraceRun(run_id="unknown", events=[])
             return self._run.model_copy(deep=True)
+
+    def _maybe_append_event(self, evt: TraceEvent) -> None:
+        if not trace_incremental():
+            return
+        out = export_dir.get()
+        if out is None:
+            return
+        run_root = Path(out).parent
+        events_path = run_root / "collected" / "events.jsonl"
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        with events_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(evt.model_dump(mode="json"), default=str) + "\n")
 
 
 _collector: TraceCollector | None = None

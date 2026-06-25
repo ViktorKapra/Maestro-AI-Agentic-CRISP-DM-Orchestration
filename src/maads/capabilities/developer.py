@@ -49,18 +49,6 @@ def plan_monitoring(state: CrispDMState) -> StateDelta:
     return StateDelta(["dep.monitoring_and_maintenance_plan"])
 
 
-def write_final_report(fileio: FileIO, state: CrispDMState) -> StateDelta:
-    lines = [
-        f"# Final report — {state.case_id}",
-        f"- Technique: {state.md.modeling_technique}",
-        f"- CV score: {state.md.chosen_model.cv_score if state.md.chosen_model else 'n/a'}",
-        f"- Submission: {state.dep.submission_path}",
-    ]
-    path = fileio.write_text("final_report.md", "\n".join(lines))
-    state.dep.final_report_path = str(path)
-    return StateDelta(["dep.final_report_path"])
-
-
 def experience_review(state: CrispDMState) -> StateDelta:
     loops = [le.label for le in state.loop_history]
     deg = state.degraded_flags

@@ -89,8 +89,13 @@ def _patch_crew() -> None:
     if getattr(crew_mod.run_json_task, "_maads_traced", False):
         return
 
-    from maads.crew import build_task_description, pop_last_kickoff_output
+    from maads.crew import (
+        build_task_description,
+        pop_last_json_task_meta,
+        pop_last_kickoff_output,
+    )
     from maads.observability.llm_communications import get_communication_registry
+    from maads.output_contracts import validate_agent_output
     from maads.prompts import AGENT_PROMPTS
 
     def _trace_crew_kickoff(
@@ -146,6 +151,11 @@ def _patch_crew() -> None:
                 "state_view_bytes": len(state_view.encode("utf-8")),
             },
             trace_event_id=crew_evt_id,
+            parent_comm_id=(
+                registry.open_record_ids()[0]
+                if registry.open_record_ids()
+                else None
+            ),
         )
 
         crew_attrs = {
@@ -171,13 +181,43 @@ def _patch_crew() -> None:
             raw_output, total_tokens = pop_last_kickoff_output()
             duration_ms = round((time.monotonic() - t0) * 1000, 2)
             sizes = registry.preview_sizes(comm_id)
-            parse_ok = parsed_ok(result) if parsed_ok else bool(result)
+
+            task_meta = pop_last_json_task_meta() if span_suffix == "json" else None
+            if task_meta is not None:
+                json_valid = bool(task_meta.get("json_valid"))
+                schema_ok = bool(task_meta.get("schema_ok"))
+                schema_errors = list(task_meta.get("schema_errors") or [])
+                repair = task_meta.get("repair")
+                parse_ok = json_valid and schema_ok
+            elif parsed_ok:
+                parse_ok = parsed_ok(result)
+                json_valid = parse_ok
+                schema_ok = parse_ok
+                schema_errors = []
+                repair = None
+                if span_suffix == "json" and isinstance(result, dict):
+                    schema_errors = validate_agent_output(
+                        agent_name, result, substep=substep,
+                    )
+                    schema_ok = not schema_errors
+                    json_valid = True
+                    parse_ok = schema_ok
+            else:
+                parse_ok = bool(result)
+                json_valid = parse_ok
+                schema_ok = parse_ok
+                schema_errors = []
+                repair = None
 
             registry.close_record(
                 comm_id,
                 raw_response=raw_output,
                 parsed_json=result if isinstance(result, dict) else None,
                 parse_ok=parse_ok,
+                json_valid=json_valid,
+                schema_ok=schema_ok,
+                schema_errors=schema_errors or None,
+                repair=repair,
                 tokens={"total": total_tokens},
                 duration_ms=duration_ms,
             )
@@ -281,6 +321,13 @@ def _patch_crew() -> None:
 
     if agents_mod.run_json_task is orig_json:
         agents_mod.run_json_task = traced_run_json_task
+
+    # codegen.py binds run_text_task at import time; patch after crew so first import
+    # of codegen sees the traced function.
+    import maads.codegen as codegen_mod
+
+    if codegen_mod.run_text_task is orig_text:
+        codegen_mod.run_text_task = traced_run_text_task
 
 
 def _patch_tools() -> None:

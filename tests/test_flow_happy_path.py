@@ -10,6 +10,7 @@ from maads.config import load_case_config
 from maads.flow.crisp_dm_flow import CrispDMFlow
 from maads.paths import resolve_path
 from maads.state import SUBSTEPS, CrispDMState, Phase
+from maads.outcome import completion_halt_reason
 from maads.testing.fake_llm import fake_llm_response
 
 
@@ -62,7 +63,7 @@ def test_flow_happy_path_all_substeps(mock_llm, titanic_state: CrispDMState, tmp
         state = flow.run()
 
     assert state.halted
-    assert state.halt_reason == "completed phase 6"
+    assert state.halt_reason == completion_halt_reason(state)
     expected = []
     for phase in Phase:
         expected.extend(SUBSTEPS[phase])

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -129,3 +129,38 @@ def test_ds_model_run_ignores_llm_technique_when_execution_present(
     assert run.technique == "gradient_boosting"
     assert run.cv_score is not None
     assert run.cv_score != 0.99
+
+
+def test_de_skips_kickoff_when_execution_authoritative(tmp_path: Path, state: CrispDMState):
+    state.phase = Phase.DATA_UNDERSTANDING
+    state.substep = "2.4"
+    de = DataEngineerAgent(artifact_dir=tmp_path)
+    with patch.object(de._crew, "kickoff_substep", MagicMock()) as mock_kickoff:
+        de.act(state)
+        mock_kickoff.assert_not_called()
+    assert state.du.data_quality_report
+
+
+def test_de_calls_kickoff_for_json_only_substep(tmp_path: Path, state: CrispDMState):
+    state.phase = Phase.DATA_PREPARATION
+    state.substep = "3.1"
+    de = DataEngineerAgent(artifact_dir=tmp_path)
+    payload = {"state_updates": {"dp": {"rationale_for_inclusion_exclusion": "keep numeric"}}}
+    with patch.object(de._crew, "kickoff_substep", return_value=payload) as mock_kickoff:
+        de.act(state)
+        mock_kickoff.assert_called_once()
+
+
+def test_ds_skips_kickoff_when_execution_authoritative(tmp_path: Path, state: CrispDMState):
+    state.phase = Phase.DATA_PREPARATION
+    state.substep = "3.5"
+    de = DataEngineerAgent(artifact_dir=tmp_path)
+    de.act(state)
+
+    state.phase = Phase.MODELING
+    state.substep = "4.3"
+    ds = DataScientistAgent(artifact_dir=tmp_path)
+    with patch.object(ds._crew, "kickoff_substep", MagicMock()) as mock_kickoff:
+        ds.act(state)
+        mock_kickoff.assert_not_called()
+    assert state.md.models

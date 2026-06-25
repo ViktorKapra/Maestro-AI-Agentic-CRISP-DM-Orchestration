@@ -8,6 +8,7 @@ from maads.flow.phase_runner import (
     can_fire_loop,
     deployment_review_pending,
     force_halt,
+    loop_block_reason,
     loop_route_for_phase,
     resolve_plan,
 )
@@ -24,8 +25,10 @@ def route_from_plan(ctx: RunContext, plan: Plan) -> str:
         if plan.loop_to_phase and can_fire_loop(ctx, plan):
             apply_loop(ctx, plan, log_source="flow")
             return loop_route_for_phase(int(plan.loop_to_phase))
-        ctx.state.append_log("flow", "loop blocked by guard", level="warn")
-        return "continue"
+        reason = loop_block_reason(ctx, plan)
+        ctx.state.append_log("flow", f"loop blocked by guard: {reason}", level="warn")
+        force_halt(ctx.state, f"recovery budget exhausted: {reason}")
+        return "halt"
     return "continue"
 
 

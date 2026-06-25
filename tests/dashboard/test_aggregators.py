@@ -71,10 +71,15 @@ def test_build_graph_agent_edges_use_owner_ids():
     graph = build_graph(run)
     node_ids = {n["id"] for n in graph["nodes"]}
     assert "pm" in node_ids
-    assert "orchestrator" in node_ids
+    assert "crisp_dm_flow" in node_ids
+    flow_node = next(n for n in graph["nodes"] if n["id"] == "crisp_dm_flow")
+    assert flow_node["data"]["label"] == "CrispDM Flow"
+    assert flow_node["type"] == "flowNode"
     assert "llm" in node_ids
     llm_edges = [e for e in graph["edges"] if e["target"] == "llm"]
     assert any(e["source"] == "pm" for e in llm_edges)
+    dispatch_edges = [e for e in graph["edges"] if e["edgeType"] == "dispatch"]
+    assert any(e["source"] == "crisp_dm_flow" and e["target"] == "pm" for e in dispatch_edges)
 
 
 def test_build_graph_active_llm_edge():
@@ -125,6 +130,25 @@ def test_build_graph_developer_debug_llm_edge():
     llm_edges = [e for e in graph["edges"] if e["target"] == "llm"]
     assert any(e["source"] == "developer" for e in llm_edges)
     assert not any(e["source"] == "data_engineer" for e in llm_edges)
+
+
+def test_build_graph_layout_centers_flow_among_agents():
+    run = TraceRun(
+        run_id="r1",
+        events=[
+            _evt("evt_0001", "substep.dispatch", attrs={"owner": "pm", "substep": "1.4"}, mono=10),
+            _evt("evt_0002", "substep.dispatch", attrs={"owner": "domain", "substep": "1.1"}, mono=20),
+            _evt("evt_0003", "llm.start", attrs={"communication_id": "comm_0001", "maads_agent": "pm"}, mono=30),
+        ],
+    )
+    graph = build_graph(run)
+    positions = {n["id"]: n["position"] for n in graph["nodes"]}
+    assert positions["crisp_dm_flow"]["x"] < positions["pm"]["x"] < positions["llm"]["x"]
+    pm_y = positions["pm"]["y"]
+    domain_y = positions["domain"]["y"]
+    flow_y = positions["crisp_dm_flow"]["y"]
+    assert pm_y < domain_y
+    assert pm_y <= flow_y <= domain_y
 
 
 @pytest.mark.skipif(

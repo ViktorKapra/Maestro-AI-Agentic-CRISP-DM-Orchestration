@@ -9,6 +9,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 
+from maads.artifact_config import trace_otel_enabled
 from maads.observability.collector import TraceCollector, get_collector
 
 _instrumented = False
@@ -111,6 +112,10 @@ def setup_otel(collector: TraceCollector | None = None) -> TracerProvider:
         trace.set_tracer_provider(provider)
 
     provider.add_span_processor(CollectorSpanProcessor(coll))
+
+    if not trace_otel_enabled():
+        # CrewAI instrumentor still runs; collector filters otel.* events when disabled.
+        pass
 
     if os.getenv("MAADS_TRACE_OTEL_CONSOLE", "").lower() in {"1", "true", "yes"}:
         provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))

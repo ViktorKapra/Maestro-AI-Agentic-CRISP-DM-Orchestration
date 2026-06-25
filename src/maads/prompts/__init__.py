@@ -6,6 +6,18 @@ from maads.prompts.identities.data_engineer import format_data_engineer_task
 from maads.prompts.identities.data_scientist import format_data_scientist_task
 from maads.prompts.identities.domain import format_domain_understanding_task
 from maads.prompts.identities.developer import format_developer_task
+from maads.prompts.identities.storyteller import format_storyteller_task
+
+JSON_TERMINATION_INSTRUCTION = (
+    "Return the raw JSON payload matching the target schema. "
+    "Your response must begin with '{' and end with '}'. "
+    "Do not include markdown wraps."
+)
+
+JSON_EXPECTED_OUTPUT = (
+    "A single JSON object, no prose, no Markdown fences. "
+    "Response must begin with '{' and end with '}'."
+)
 
 AGENT_PROMPTS: dict[str, dict[str, str]] = load_agent_prompts()
 
@@ -15,6 +27,7 @@ AGENT_TASK_TEMPLATES: dict[str, str] = {
     "data_engineer": "substep_json",
     "data_scientist": "substep_json",
     "developer": "substep_json",
+    "storyteller": "substep_json",
 }
 
 STATE_ONLY_TASK_TEMPLATE = task_scaffold("state_only")["description"]
@@ -41,6 +54,8 @@ PM_DECISION_INSTRUCTION = (
 __all__ = [
     "AGENT_PROMPTS",
     "AGENT_TASK_TEMPLATES",
+    "JSON_EXPECTED_OUTPUT",
+    "JSON_TERMINATION_INSTRUCTION",
     "STATE_ONLY_TASK_TEMPLATE",
     "TASK_TEMPLATE",
     "PM_DECISION_INSTRUCTION",
@@ -50,4 +65,5 @@ __all__ = [
     "format_data_scientist_task",
     "format_domain_understanding_task",
     "format_developer_task",
+    "format_storyteller_task",
 ]

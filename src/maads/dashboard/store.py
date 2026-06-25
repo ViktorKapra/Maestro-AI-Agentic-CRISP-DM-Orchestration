@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from maads.artifact_paths import RunPaths, load_manifest
 from maads.artifact_runs import resolve_active_run_dir
 from maads.observability.llm_communications import LLMCommunicationRecord
 from maads.observability.schema import TraceRun
@@ -23,6 +24,9 @@ def list_cases(artifact_root: Path) -> list[dict[str, Any]]:
             continue
         status_path = run_dir / "status.json"
         if not status_path.is_file():
+            paths = RunPaths(run_dir)
+            status_path = paths.derived / "status.json"
+        if not status_path.is_file():
             continue
         try:
             payload = json.loads(status_path.read_text(encoding="utf-8"))
@@ -33,7 +37,8 @@ def list_cases(artifact_root: Path) -> list[dict[str, Any]]:
 
 
 def _case_summary(case_id: str, artifact_dir: Path, status: dict[str, Any]) -> dict[str, Any]:
-    trace_path = artifact_dir / "trace" / "trace.json"
+    paths = RunPaths(artifact_dir)
+    trace_path = paths.trace_json()
     ended_at: str | None = None
     if trace_path.is_file():
         try:
@@ -48,6 +53,8 @@ def _case_summary(case_id: str, artifact_dir: Path, status: dict[str, Any]) -> d
         run_status = "complete"
     else:
         run_status = "running"
+    progress = status.get("progress") if isinstance(status.get("progress"), dict) else {}
+    completed = progress.get("completed_substeps", status.get("completed_substeps"))
     return {
         "case_id": case_id,
         "artifact_dir": str(artifact_dir.resolve()),
@@ -55,7 +62,7 @@ def _case_summary(case_id: str, artifact_dir: Path, status: dict[str, Any]) -> d
         "updated_at": status.get("updated_at"),
         "phase": status.get("phase"),
         "phase_name": status.get("phase_name"),
-        "completed_substeps": status.get("completed_substeps"),
+        "completed_substeps": completed,
         "total_substeps": status.get("total_substeps"),
     }
 
@@ -68,15 +75,25 @@ def case_dir(artifact_root: Path, case_id: str) -> Path:
     return run_dir
 
 
+def read_live_summary(artifact_dir: Path) -> dict[str, Any]:
+    paths = RunPaths(artifact_dir)
+    path = paths.live_summary()
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return read_status(artifact_dir)
+
+
 def read_status(artifact_dir: Path) -> dict[str, Any]:
     path = artifact_dir / "status.json"
+    if not path.is_file():
+        path = RunPaths(artifact_dir).derived / "status.json"
     if not path.is_file():
         raise FileNotFoundError("status.json not found")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def read_trace(artifact_dir: Path) -> TraceRun:
-    path = artifact_dir / "trace" / "trace.json"
+    path = RunPaths(artifact_dir).trace_json()
     if not path.is_file():
         raise FileNotFoundError("trace.json not found")
     return TraceRun.model_validate_json(path.read_text(encoding="utf-8"))
@@ -84,7 +101,7 @@ def read_trace(artifact_dir: Path) -> TraceRun:
 
 def read_trace_optional(artifact_dir: Path, *, case_id: str = "") -> TraceRun:
     """Return trace data or an empty run shell when tracing has not flushed yet."""
-    path = artifact_dir / "trace" / "trace.json"
+    path = RunPaths(artifact_dir).trace_json()
     if path.is_file():
         return TraceRun.model_validate_json(path.read_text(encoding="utf-8"))
     status_path = artifact_dir / "status.json"
@@ -98,8 +115,13 @@ def read_trace_optional(artifact_dir: Path, *, case_id: str = "") -> TraceRun:
     return TraceRun(run_id=artifact_dir.name, case_id=case or None, events=[])
 
 
-def read_communications(artifact_dir: Path) -> list[LLMCommunicationRecord]:
-    path = artifact_dir / "trace" / "communications.jsonl"
+def read_communications(
+    artifact_dir: Path,
+    *,
+    since_id: str | None = None,
+    limit: int | None = None,
+) -> list[LLMCommunicationRecord]:
+    path = RunPaths(artifact_dir).communications_jsonl()
     if not path.is_file():
         return []
     records: list[LLMCommunicationRecord] = []
@@ -108,11 +130,30 @@ def read_communications(artifact_dir: Path) -> list[LLMCommunicationRecord]:
         if not line:
             continue
         records.append(LLMCommunicationRecord.model_validate_json(line))
+    if since_id:
+        start = 0
+        for i, rec in enumerate(records):
+            if rec.id == since_id:
+                start = i + 1
+                break
+        records = records[start:]
+    if limit is not None and limit > 0:
+        records = records[-limit:]
     return records
 
 
+def read_communication(
+    artifact_dir: Path,
+    comm_id: str,
+) -> LLMCommunicationRecord | None:
+    for rec in read_communications(artifact_dir):
+        if rec.id == comm_id:
+            return rec
+    return None
+
+
 def read_communications_summary(artifact_dir: Path) -> dict[str, Any]:
-    path = artifact_dir / "trace" / "communications_summary.json"
+    path = RunPaths(artifact_dir).communications_summary()
     if not path.is_file():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
@@ -121,6 +162,8 @@ def read_communications_summary(artifact_dir: Path) -> dict[str, Any]:
 def read_process_snapshot(artifact_dir: Path) -> dict[str, Any]:
     """Read live ``process.json`` or fall back to ``final_state.json``."""
     process_path = artifact_dir / "process.json"
+    if not process_path.is_file():
+        process_path = RunPaths(artifact_dir).derived / "process.json"
     if process_path.is_file():
         return json.loads(process_path.read_text(encoding="utf-8"))
     final_path = artifact_dir / "final_state.json"
@@ -154,6 +197,15 @@ def read_state(artifact_dir: Path) -> dict[str, Any]:
             }
         return {"updated_at": None, "source": "live", "state": raw}
 
+    derived = RunPaths(artifact_dir).derived / "state_snapshot.json"
+    if derived.is_file():
+        raw = json.loads(derived.read_text(encoding="utf-8"))
+        return {
+            "updated_at": raw.get("updated_at"),
+            "source": "live",
+            "state": raw.get("state", raw),
+        }
+
     final_path = artifact_dir / "final_state.json"
     if final_path.is_file():
         return {
@@ -163,3 +215,38 @@ def read_state(artifact_dir: Path) -> dict[str, Any]:
         }
 
     raise FileNotFoundError("state.json not found")
+
+
+def read_manifest(artifact_dir: Path) -> dict[str, Any]:
+    return load_manifest(artifact_dir)
+
+
+def read_report(artifact_dir: Path, name: str) -> dict[str, Any]:
+    path = RunPaths(artifact_dir).reports / name
+    if not path.is_file():
+        raise FileNotFoundError(f"report not found: {name}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_report_text(artifact_dir: Path, name: str) -> str:
+    path = RunPaths(artifact_dir).reports / name
+    if not path.is_file():
+        raise FileNotFoundError(f"report not found: {name}")
+    return path.read_text(encoding="utf-8")
+
+
+def list_runs(case_root_path: Path) -> list[dict[str, Any]]:
+    index_path = case_root_path / "runs_index.json"
+    if index_path.is_file():
+        try:
+            raw = json.loads(index_path.read_text(encoding="utf-8"))
+            return list(raw.get("runs") or [])
+        except (json.JSONDecodeError, OSError):
+            pass
+    runs: list[dict[str, Any]] = []
+    runs_dir = case_root_path / "runs"
+    if runs_dir.is_dir():
+        for child in sorted(runs_dir.iterdir(), reverse=True):
+            if child.is_dir():
+                runs.append({"run_id": child.name, "artifact_dir": str(child)})
+    return runs

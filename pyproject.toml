@@ -18,6 +18,7 @@ dependencies = [
     "pandas>=2.1",
     "scikit-learn>=1.4",
     "pyarrow>=15.0",
+    "matplotlib>=3.8",
     # data
     "kaggle>=1.6",
     # observability

@@ -19,3 +19,4 @@ class StateDelta:
     """What an agent changed, for logging."""
     fields_written: list[str] = field(default_factory=list)
     notes: str = ""
+    failed: bool = False

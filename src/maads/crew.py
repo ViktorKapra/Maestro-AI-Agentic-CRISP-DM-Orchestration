@@ -24,16 +24,17 @@ import os
 import re
 from contextvars import ContextVar
 from pathlib import Path
+from typing import Any
 
 from crewai import Agent, Crew, Task
 
 from maads.crew_base import agent_for, build_llm, reset_llm_caches, resolve_model_for_agent
+from maads.prompt_context import compile_task_payload
 from maads.prompts import (
     AGENT_TASK_TEMPLATES,
-    STATE_ONLY_TASK_TEMPLATE,
-    TASK_TEMPLATE,
+    JSON_EXPECTED_OUTPUT,
 )
-from maads.state import SUBSTEP_NAMES, CrispDMState
+from maads.state import CrispDMState
 
 __all__ = [
     "build_llm",
@@ -41,6 +42,7 @@ __all__ = [
     "resolve_model_for_agent",
     "reset_llm_caches",
     "build_task_description",
+    "pop_last_json_task_meta",
     "pop_last_kickoff_output",
     "run_json_task",
     "run_text_task",
@@ -49,6 +51,9 @@ __all__ = [
 
 _last_crew_output: ContextVar[str | None] = ContextVar("_last_crew_output", default=None)
 _last_crew_tokens: ContextVar[int | None] = ContextVar("_last_crew_tokens", default=None)
+_last_json_task_meta: ContextVar[dict[str, Any] | None] = ContextVar(
+    "_last_json_task_meta", default=None,
+)
 
 
 def pop_last_kickoff_output() -> tuple[str | None, int | None]:
@@ -58,6 +63,13 @@ def pop_last_kickoff_output() -> tuple[str | None, int | None]:
     _last_crew_output.set(None)
     _last_crew_tokens.set(None)
     return raw, tokens
+
+
+def pop_last_json_task_meta() -> dict[str, Any] | None:
+    """Return validation/repair metadata from the most recent ``run_json_task``."""
+    meta = _last_json_task_meta.get()
+    _last_json_task_meta.set(None)
+    return meta
 
 
 class CrewKickoffError(RuntimeError):
@@ -120,8 +132,9 @@ def _find_balanced_json(text: str) -> str | None:
 
 
 def _repair_json(text: str) -> str:
-    """Fix common LLM JSON mistakes (e.g. trailing commas)."""
-    return re.sub(r",(\s*[}\]])", r"\1", text)
+    """Fix common LLM JSON mistakes (trailing commas, line comments)."""
+    without_comments = re.sub(r"//[^\n\"]*", "", text)
+    return re.sub(r",(\s*[}\]])", r"\1", without_comments)
 
 
 def _try_parse_json(text: str) -> dict | None:
@@ -187,19 +200,14 @@ def build_task_description(
     agent = agent_for(agent_name, dataset_name)
     state_view = json.dumps(view, default=str, ensure_ascii=False)
     template_kind = AGENT_TASK_TEMPLATES.get(agent_name, "substep_json")
-    if template_kind == "state_only":
-        description = STATE_ONLY_TASK_TEMPLATE.format(
-            state_view=state_view,
-            instruction=instruction,
-        )
-    else:
-        description = TASK_TEMPLATE.format(
-            substep=state.substep,
-            substep_name=SUBSTEP_NAMES.get(state.substep, "?"),
-            instruction=instruction,
-            state_view=state_view,
-            schema_hint=schema_hint,
-        )
+    description = compile_task_payload(
+        agent_name=agent_name,
+        instruction=instruction,
+        state_view=view,
+        schema_hint=schema_hint,
+        template_kind=template_kind,
+        substep=state.substep,
+    )
     return description, state_view, agent
 
 
@@ -269,18 +277,55 @@ def run_json_task(
     *,
     artifact_dir: Path | None = None,
 ) -> dict | None:
-    """Run one CrewAI task for `agent_name` and return parsed JSON (or None).
+    """Run one CrewAI task for `agent_name` and return schema-valid JSON (or None).
 
     Raises:
-        CrewKickoffError: when kickoff fails or the output is not JSON.
+        CrewKickoffError: when kickoff fails or the output is not JSON/schema-valid.
         RuntimeError: when MAX_TOKENS_PER_RUN is exceeded after the call.
     """
+    from maads.output_contracts import validate_agent_output
+
+    _last_json_task_meta.set({
+        "json_valid": False,
+        "schema_ok": False,
+        "schema_errors": [],
+        "repair": {"kind": "none", "requesting_agent": agent_name, "succeeded": True},
+    })
+
     raw_output = _kickoff(
         agent_name, instruction, state, schema_hint,
-        expected_output="A single JSON object, no prose, no Markdown fences.",
+        expected_output=JSON_EXPECTED_OUTPUT,
     )
     parsed = _extract_json(raw_output)
-    if parsed is None and raw_output.strip():
+    json_valid = parsed is not None
+
+    def _set_meta(
+        *,
+        payload: dict | None,
+        repair_kind: str = "none",
+        repair_succeeded: bool = True,
+    ) -> list[str]:
+        errors = (
+            validate_agent_output(agent_name, payload, substep=state.substep)
+            if payload is not None
+            else ["output is not a JSON object"]
+        )
+        _last_json_task_meta.set({
+            "json_valid": payload is not None,
+            "schema_ok": not errors,
+            "schema_errors": errors,
+            "repair": {
+                "kind": repair_kind,
+                "requesting_agent": agent_name,
+                "succeeded": repair_succeeded and not errors,
+            },
+        })
+        return errors
+
+    if parsed is not None:
+        errors = _set_meta(payload=parsed)
+        if not errors:
+            return parsed
         if artifact_dir is not None:
             from maads.debug import debug_json_parse
 
@@ -291,12 +336,51 @@ def run_json_task(
                 raw_text=raw_output,
                 schema_hint=schema_hint,
                 instruction=instruction,
+                failure_kind="json_schema",
+                invalid_payload=parsed,
             )
             if outcome.status == "FIXED" and outcome.payload is not None:
-                return outcome.payload
+                repair_errors = _set_meta(
+                    payload=outcome.payload,
+                    repair_kind=outcome.repair_kind,
+                    repair_succeeded=True,
+                )
+                if not repair_errors:
+                    return outcome.payload
+        schema_errors = _last_json_task_meta.get() or {}
+        detail = "; ".join(schema_errors.get("schema_errors", errors)[:5])
+        raise CrewKickoffError(
+            f"CrewAI returned schema-invalid JSON for {agent_name} "
+            f"at substep {state.substep}: {detail}"
+        )
+
+    if raw_output.strip():
+        if artifact_dir is not None:
+            from maads.debug import debug_json_parse
+
+            outcome = debug_json_parse(
+                state=state,
+                artifact_dir=artifact_dir,
+                requesting_agent=agent_name,
+                raw_text=raw_output,
+                schema_hint=schema_hint,
+                instruction=instruction,
+                failure_kind="json_parse",
+            )
+            if outcome.status == "FIXED" and outcome.payload is not None:
+                repair_errors = _set_meta(
+                    payload=outcome.payload,
+                    repair_kind=outcome.repair_kind,
+                    repair_succeeded=True,
+                )
+                if not repair_errors:
+                    return outcome.payload
+        _set_meta(payload=None, repair_succeeded=False)
         raise CrewKickoffError(
             f"CrewAI returned non-JSON output for {agent_name} at substep {state.substep}"
         )
+
+    _set_meta(payload=None, repair_succeeded=False)
     return parsed
 
 

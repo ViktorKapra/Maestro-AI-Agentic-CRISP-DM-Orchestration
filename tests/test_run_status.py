@@ -43,6 +43,12 @@ def test_bind_run_writes_status_files(tmp_path: Path):
     for key in ("bu", "du", "dp", "md", "ev", "dep", "log", "phase", "substep"):
         assert key in state_data
 
+    live = artifact_dir / "derived" / "live_summary.json"
+    assert live.is_file()
+    live_payload = json.loads(live.read_text())
+    assert live_payload["case_id"] == "titanic"
+    assert "progress" in live_payload
+
 
 def test_set_activity_and_substep_done_update_status(tmp_path: Path):
     config = load_case_config(resolve_path("configs/titanic.yaml"))

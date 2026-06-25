@@ -129,7 +129,8 @@ def test_flush_trace_keeps_run_open(tmp_path: Path):
     assert data["ended_at"] is not None
 
 
-def test_export_writes_all_artefacts(tmp_path: Path):
+def test_export_writes_all_artefacts(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("MAADS_WRITE_RENDERS", "1")
     coll = reset_collector()
     coll.start_run("titanic")
     coll.emit("run.start", name="Orchestrator.run")
@@ -142,6 +143,7 @@ def test_export_writes_all_artefacts(tmp_path: Path):
         "sequence.mmd", "flowchart.mmd", "agent_interaction.mmd", "narrative.md",
     ):
         assert (out / name).exists(), f"missing {name}"
+    assert (tmp_path / "derived" / "trace.json").is_file()
     data = json.loads(path.read_text())
     assert data["case_id"] == "titanic"
     assert len(data["events"]) >= 2

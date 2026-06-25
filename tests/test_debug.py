@@ -1,6 +1,7 @@
 """Tests for Developer DEBUG mode (PythonExec + JSON repair)."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ from maads.debug import (
 from maads.paths import resolve_path
 from maads.state import CrispDMState
 from maads.tools import ExecResult, PythonExec
+from maads.output_contracts import _minimal_de_response
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +86,137 @@ def test_debug_json_parse_uses_developer_llm_when_needed(
     )
     assert outcome.status == "FIXED"
     assert outcome.payload["action"] == "advance"
+
+
+def test_debug_json_parse_rejects_developer_wrapper_for_data_engineer(
+    monkeypatch: pytest.MonkeyPatch,
+    state: CrispDMState,
+    artifact_dir: Path,
+):
+    state.substep = "2.4"
+    wrapper = {
+        "assignment_id": "debug-2.4",
+        "agent": "data_engineer",
+        "status": "FIXED",
+        "summary": "repaired",
+        "state_updates": "",
+        "evidence": [],
+        "decisions": [],
+        "operations": [],
+        "quality_findings": "",
+        "validations": [],
+        "artifacts": [],
+        "assumptions": "",
+        "risks": "",
+        "blockers": [],
+        "handoffs": [],
+        "loop_signal": {
+            "recommended": False,
+            "contour": "NONE",
+            "reason": None,
+            "evidence_ids": [],
+        },
+        "completion_evidence": {
+            "input_contract_valid": True,
+            "required_outputs_present": True,
+            "execution_succeeded": True,
+            "artifacts_verified": True,
+            "leakage_checks_passed": True,
+            "reproducibility_checks_passed": True,
+            "safe_for_downstream_use": True,
+        },
+    }
+    monkeypatch.setattr(
+        "maads.crew.run_text_task",
+        lambda *_a, **_k: json.dumps(wrapper),
+    )
+    outcome = debug_json_parse(
+        state=state,
+        artifact_dir=artifact_dir,
+        requesting_agent="data_engineer",
+        raw_text="not json",
+        schema_hint="",
+    )
+    assert outcome.status == "STUCK"
+    assert outcome.schema_ok is False
+    assert outcome.schema_errors
+
+
+@patch("maads.crew._kickoff")
+def test_run_json_task_rejects_schema_invalid_developer_repair(
+    mock_kickoff,
+    monkeypatch: pytest.MonkeyPatch,
+    state: CrispDMState,
+    artifact_dir: Path,
+):
+    state.substep = "2.4"
+    mock_kickoff.return_value = "broken output"
+    monkeypatch.setattr(
+        "maads.crew.run_text_task",
+        lambda *_a, **_k: json.dumps({
+            "assignment_id": "debug-2.4",
+            "agent": "data_engineer",
+            "status": "FIXED",
+            "summary": "repaired",
+            "state_updates": "",
+            "evidence": [],
+            "decisions": [],
+            "operations": [],
+            "quality_findings": "",
+            "validations": [],
+            "artifacts": [],
+            "assumptions": "",
+            "risks": "",
+            "blockers": [],
+            "handoffs": [],
+            "loop_signal": {
+                "recommended": False,
+                "contour": "NONE",
+                "reason": None,
+                "evidence_ids": [],
+            },
+            "completion_evidence": {
+                "input_contract_valid": True,
+                "required_outputs_present": True,
+                "execution_succeeded": True,
+                "artifacts_verified": True,
+                "leakage_checks_passed": True,
+                "reproducibility_checks_passed": True,
+                "safe_for_downstream_use": True,
+            },
+        }),
+    )
+    with pytest.raises(CrewKickoffError, match="schema-invalid|non-JSON"):
+        run_json_task(
+            "data_engineer",
+            "verify quality",
+            state,
+            artifact_dir=artifact_dir,
+        )
+
+
+@patch("maads.crew._kickoff")
+def test_run_json_task_accepts_schema_valid_developer_repair(
+    mock_kickoff,
+    monkeypatch: pytest.MonkeyPatch,
+    state: CrispDMState,
+    artifact_dir: Path,
+):
+    state.substep = "2.4"
+    mock_kickoff.return_value = "broken output"
+    repaired = _minimal_de_response()
+    monkeypatch.setattr(
+        "maads.crew.run_text_task",
+        lambda *_a, **_k: json.dumps(repaired),
+    )
+    parsed = run_json_task(
+        "data_engineer",
+        "verify quality",
+        state,
+        artifact_dir=artifact_dir,
+    )
+    assert parsed["assignment_id"] == "2.4"
+    assert parsed["status"] == "COMPLETED"
 
 
 def test_debug_python_exec_fixes_failing_code(
@@ -202,7 +335,13 @@ def test_de_32_debug_before_fallback(
 
     monkeypatch.setattr("maads.codegen.run_text_task", fake_text)
     monkeypatch.setattr("maads.crew.run_text_task", fake_text)
-    monkeypatch.setattr("maads.agents.run_json_task", lambda *a, **k: {})
+
+    def fake_json_task(_agent, _instruction, st, *_a, **_k):
+        payload = _minimal_de_response(st.substep)
+        payload["state_updates"]["dp"]["data_cleaning_report"] = {"status": "ok"}
+        return payload
+
+    monkeypatch.setattr("maads.agents.run_json_task", fake_json_task)
 
     agent = DataEngineerAgent(artifact_dir=artifact_dir)
     state.phase = 2  # noqa: use int for phase if needed

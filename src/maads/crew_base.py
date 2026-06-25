@@ -24,12 +24,13 @@ from crewai.project import CrewBase, agent, task
 from importlib.resources import files
 
 from maads.crew_tools import read_case_config_summary, validate_submission_file
-from maads.knowledge_setup import domain_knowledge_sources, resolve_embedder_config, skills_for
+from maads.knowledge_setup import skills_for
 from maads.prompts import AGENT_PROMPTS
 from maads.prompts.identities.domain import domain_identity
 
 # Structured JSON / orchestration (PM decisions, domain understanding).
 _JSON_AGENTS = frozenset({"pm", "domain"})
+_STRUCTURED_OUTPUT_AGENTS = frozenset({"pm", "domain", "data_engineer", "data_scientist", "storyteller"})
 # Python authoring and DEBUG repair (code-first workloads).
 _CODE_AGENTS = frozenset({"developer", "data_engineer", "data_scientist"})
 
@@ -87,6 +88,20 @@ def resolve_model_for_agent(agent_name: str) -> str:
     return top if tier == "top" else mid
 
 
+def structured_outputs_enabled(agent_name: str, model: str) -> bool:
+    """Whether to request OpenAI-style json_schema strict mode for this agent."""
+    setting = os.getenv("MAADS_STRUCTURED_OUTPUTS", "auto").lower()
+    if setting in {"0", "false", "no", "off"}:
+        return False
+    if agent_name not in _STRUCTURED_OUTPUT_AGENTS:
+        return False
+    if model.startswith("ollama/"):
+        return setting in {"1", "true", "yes", "on", "force"}
+    if setting in {"1", "true", "yes", "on", "force"}:
+        return True
+    return setting == "auto"
+
+
 @lru_cache(maxsize=32)
 def build_llm(agent_name: str) -> LLM:
     """Return a dedicated CrewAI LLM instance for this agent role."""
@@ -101,7 +116,19 @@ def build_llm(agent_name: str) -> LLM:
             except ValueError:
                 pass
         return LLM(**kwargs)
-    return LLM(model=model)
+
+    kwargs = {"model": model}
+    if structured_outputs_enabled(agent_name, model):
+        from maads.output_contracts import output_model_for_agent
+
+        output_model = output_model_for_agent(agent_name)
+        if output_model is not None:
+            kwargs["response_format"] = output_model
+    try:
+        return LLM(**kwargs)
+    except (ImportError, TypeError, ValueError):
+        kwargs.pop("response_format", None)
+        return LLM(**kwargs)
 
 
 def _tools_for(name: str) -> list[Any]:
@@ -121,16 +148,11 @@ def build_agent(name: str, persona: dict[str, str], *, case_id: str = "") -> Age
         "llm": build_llm(name),
         "allow_delegation": False,
         "verbose": False,
-        "skills": skills_for(name),
         "tools": _tools_for(name),
     }
-    if name == "domain" and case_id:
-        sources = domain_knowledge_sources(case_id)
-        if sources:
-            kwargs["knowledge_sources"] = sources
-            embedder = resolve_embedder_config()
-            if embedder is not None:
-                kwargs["embedder"] = embedder
+    skills = skills_for(name)
+    if skills:
+        kwargs["skills"] = skills
     return Agent(**kwargs)
 
 
@@ -161,6 +183,10 @@ class MaadsCrew:
     def developer(self) -> Agent:
         return build_agent("developer", AGENT_PROMPTS["developer"])
 
+    @agent
+    def storyteller(self) -> Agent:
+        return build_agent("storyteller", AGENT_PROMPTS["storyteller"])
+
     @task
     def state_only_task(self) -> Task:
         """PM directive scaffold (description skeleton + expected_output from tasks.yaml)."""
@@ -182,6 +208,7 @@ _AGENT_METHODS = {
     "data_engineer": _CREW.data_engineer,
     "data_scientist": _CREW.data_scientist,
     "developer": _CREW.developer,
+    "storyteller": _CREW.storyteller,
 }
 
 

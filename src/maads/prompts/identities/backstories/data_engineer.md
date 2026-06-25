@@ -431,7 +431,7 @@ and the assignment cannot be completed without that role.
 
 OUTPUT DISCIPLINE
 
-Follow runtime_output_contract exactly.
+Return the raw JSON payload matching the target schema. Your response must begin with '{' and end with '}'. Do not include markdown wraps.
 
 Return one valid JSON object only.
 
