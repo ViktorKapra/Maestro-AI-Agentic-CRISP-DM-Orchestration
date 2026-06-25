@@ -19,7 +19,7 @@ from maads.debug import (
 from maads.paths import resolve_path
 from maads.state import CrispDMState
 from maads.tools import ExecResult, PythonExec
-from maads.output_contracts import _minimal_de_response
+from maads.output_contracts import _minimal_de_response, minimal_data_scientist_output
 
 
 @pytest.fixture(autouse=True)
@@ -53,6 +53,36 @@ def test_classify_exec_error_labels_schema_and_timeout():
     assert classify_exec_error(
         ExecResult(ok=False, stdout="", stderr="timed out", return_code=-1, timed_out=True),
     ) == "timeout"
+
+
+def test_debug_json_parse_normalizes_schema_without_developer_llm(
+    state: CrispDMState,
+    artifact_dir: Path,
+):
+    state.substep = "4.1"
+    invalid = minimal_data_scientist_output(
+        "4.1",
+        state_updates={
+            "md": {
+                "modeling_technique": "logistic_regression",
+                "modeling_assumptions": ["text baseline"],
+            },
+        },
+    )
+    invalid["assumptions"] = ["Plain string assumption"]
+    invalid["risks"] = ["Plain string risk"]
+    outcome = debug_json_parse(
+        state=state,
+        artifact_dir=artifact_dir,
+        requesting_agent="data_scientist",
+        raw_text=json.dumps(invalid),
+        failure_kind="json_schema",
+        invalid_payload=invalid,
+    )
+    assert outcome.status == "FIXED"
+    assert outcome.repair_kind == "deterministic_schema"
+    assert outcome.payload is not None
+    assert outcome.payload["assumptions"][0]["statement"] == "Plain string assumption"
 
 
 def test_debug_json_parse_repairs_trailing_comma(state: CrispDMState, artifact_dir: Path):

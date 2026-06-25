@@ -97,6 +97,7 @@ def format_developer_debug_task(
     max_retries: int = MAX_DEBUG_RETRIES,
     malformed_json: str = "",
     task_instruction: str = "",
+    schema_errors: list[str] | None = None,
 ) -> str:
     """Build a DEBUG-mode instruction for the Developer LLM."""
     runtime_input = {
@@ -117,6 +118,7 @@ def format_developer_debug_task(
             "stderr_excerpt": stderr_excerpt,
             "attempt": attempt,
             "retry_budget": max_retries,
+            "schema_errors": schema_errors or [],
         },
         "inputs": {
             "failing_code": failing_code or None,
@@ -135,12 +137,21 @@ def format_developer_debug_task(
             "one JSON object line to stdout when executed."
         )
     else:
+        schema_fix = ""
+        if schema_errors:
+            schema_fix = (
+                " Fix these validation errors: "
+                + "; ".join(schema_errors[:8])
+                + ". assumptions/risks/blockers/handoffs must be arrays of objects "
+                '(e.g. [{"statement": "..."}]), not bare strings.'
+            )
         deliverable = (
             f"Return ONLY the repaired {requesting_agent} substep JSON for CRISP-DM "
             f"substep {state.substep}. assignment_id must be '{state.substep}' and "
             f"agent must be '{requesting_agent}'. Do NOT return debug metadata "
             "(mode, diagnosis, status=FIXED). List fields must be JSON arrays [], "
-            "never empty strings. state_updates must be an object. "
+            "never empty strings. state_updates must be an object."
+            f"{schema_fix} "
             "Your response must begin with '{{' and end with '}}'. "
             "Do not include markdown wraps."
         )

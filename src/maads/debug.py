@@ -239,9 +239,10 @@ def debug_json_parse(
     instruction: str = "",
     failure_kind: str = "json_parse",
     invalid_payload: dict[str, Any] | None = None,
+    max_retries: int = MAX_DEBUG_RETRIES,
 ) -> DebugOutcome:
     """Developer repairs malformed structured output from another agent."""
-    from maads.output_contracts import validate_agent_output
+    from maads.output_contracts import normalize_agent_output, validate_agent_output
 
     text = (raw_text or "").strip()
     if not text and invalid_payload is None:
@@ -257,8 +258,9 @@ def debug_json_parse(
                 repair_kind=repair_kind,
                 diagnosis={"error_class": failure_kind, "root_cause": "no parseable JSON"},
             )
+        normalize_agent_output(requesting_agent, payload)
         errors = validate_agent_output(
-            requesting_agent, payload, substep=state.substep,
+            requesting_agent, payload, substep=state.substep, normalize=False,
         )
         if errors:
             return DebugOutcome(
@@ -299,82 +301,145 @@ def debug_json_parse(
             }]
             return outcome
 
+    if parsed is not None and failure_kind == "json_schema":
+        coerced = dict(invalid_payload or parsed)
+        outcome = _validated(coerced, "deterministic_schema")
+        if outcome.status == "FIXED":
+            state.append_log(
+                "developer",
+                f"DEBUG normalized schema for {requesting_agent} deterministically",
+            )
+            outcome.fix_attempts = [{
+                "attempt": 0,
+                "change": "deterministic schema normalization",
+                "exec_status": "EXECUTED",
+            }]
+            return outcome
+        prior_schema_errors = outcome.schema_errors
+        malformed_source = coerced
+    else:
+        prior_schema_errors = []
+        malformed_source = invalid_payload
+
     state.append_log(
         "developer",
         f"DEBUG {failure_kind} for {requesting_agent} @ {state.substep}",
         level="warn",
     )
 
-    malformed = _excerpt(source_text or json.dumps(invalid_payload or {}), 4000)
-    debug_instruction = format_developer_debug_task(
-        state,
-        artifact_dir,
-        failure_kind=failure_kind,
-        requesting_agent=requesting_agent,
-        error_class=failure_kind,
-        last_error=(
+    malformed = _excerpt(
+        source_text or json.dumps(malformed_source or {}),
+        4000,
+    )
+    prior_error = (
+        "; ".join(prior_schema_errors[:5])
+        if prior_schema_errors
+        else (
             "upstream agent returned schema-invalid JSON"
             if failure_kind == "json_schema"
             else "upstream agent returned non-JSON or invalid JSON"
-        ),
-        stderr_excerpt="",
-        failing_code="",
-        header_var_names=[],
-        contract_hint=schema_hint,
-        schema_columns=_schema_columns(state),
-        malformed_json=malformed,
-        task_instruction=instruction,
-        attempt=1,
-        max_retries=1,
+        )
     )
-    try:
-        from maads.crew import run_text_task
+    fix_attempts: list[dict[str, Any]] = []
+    last_outcome: DebugOutcome | None = None
 
-        raw = run_text_task(
-            "developer",
-            debug_instruction,
+    for attempt in range(1, max_retries + 1):
+        debug_instruction = format_developer_debug_task(
             state,
-            expected_output=JSON_EXPECTED_OUTPUT,
+            artifact_dir,
+            failure_kind=failure_kind,
+            requesting_agent=requesting_agent,
+            error_class=failure_kind,
+            last_error=prior_error,
+            stderr_excerpt="",
+            failing_code="",
+            header_var_names=[],
+            contract_hint=schema_hint,
+            schema_columns=_schema_columns(state),
+            malformed_json=malformed,
+            task_instruction=instruction,
+            attempt=attempt,
+            max_retries=max_retries,
+            schema_errors=prior_schema_errors or None,
         )
-    except (CrewKickoffError, RuntimeError) as exc:
-        return DebugOutcome(
-            status="STUCK",
-            repair_kind="developer_llm",
-            diagnosis={
-                "error_class": failure_kind,
-                "root_cause": f"developer LLM failed: {exc}",
-            },
-        )
+        try:
+            from maads.crew import run_text_task
 
-    repaired = _extract_json(raw)
-    if repaired is None:
-        repaired = _extract_json(re.sub(r"^[^{]*", "", raw, count=1))
+            raw = run_text_task(
+                "developer",
+                debug_instruction,
+                state,
+                expected_output=JSON_EXPECTED_OUTPUT,
+            )
+        except (CrewKickoffError, RuntimeError) as exc:
+            fix_attempts.append({
+                "attempt": attempt,
+                "change": "developer LLM call",
+                "exec_status": "FAILED",
+                "stderr_excerpt": str(exc)[:500],
+            })
+            prior_error = f"developer LLM failed: {exc}"
+            last_outcome = DebugOutcome(
+                status="STUCK",
+                repair_kind="developer_llm",
+                diagnosis={
+                    "error_class": failure_kind,
+                    "root_cause": prior_error,
+                },
+            )
+            continue
 
-    outcome = _validated(repaired, "developer_llm")
-    if outcome.status == "FIXED":
-        state.append_log(
-            "developer",
-            f"DEBUG repaired JSON for {requesting_agent} via developer LLM",
-        )
-        outcome.fix_attempts = [{
-            "attempt": 1,
+        repaired = _extract_json(raw)
+        if repaired is None:
+            repaired = _extract_json(re.sub(r"^[^{]*", "", raw, count=1))
+
+        outcome = _validated(repaired, "developer_llm")
+        last_outcome = outcome
+        if outcome.status == "FIXED":
+            state.append_log(
+                "developer",
+                f"DEBUG repaired JSON for {requesting_agent} via developer LLM "
+                f"(attempt {attempt})",
+            )
+            outcome.fix_attempts = fix_attempts + [{
+                "attempt": attempt,
+                "change": "developer json repair",
+                "exec_status": "EXECUTED",
+            }]
+            return outcome
+
+        fix_attempts.append({
+            "attempt": attempt,
             "change": "developer json repair",
-            "exec_status": "EXECUTED",
-        }]
-        return outcome
+            "exec_status": "FAILED",
+            "stderr_excerpt": (
+                "; ".join(outcome.schema_errors[:5])
+                if outcome.schema_errors
+                else "could not repair malformed JSON"
+            ),
+        })
+        prior_schema_errors = outcome.schema_errors
+        prior_error = (
+            "; ".join(outcome.schema_errors[:5])
+            if outcome.schema_errors
+            else "developer could not repair malformed JSON"
+        )
+        if repaired is not None:
+            malformed = _excerpt(json.dumps(repaired), 4000)
 
     return DebugOutcome(
         status="STUCK",
-        payload=repaired,
+        payload=last_outcome.payload if last_outcome else None,
         repair_kind="developer_llm",
         schema_ok=False,
-        schema_errors=outcome.schema_errors,
+        schema_errors=last_outcome.schema_errors if last_outcome else [],
         diagnosis={
             "error_class": failure_kind,
             "root_cause": (
-                outcome.schema_errors[0]
-                if outcome.schema_errors
-                else "developer could not repair malformed JSON"
+                last_outcome.schema_errors[0]
+                if last_outcome and last_outcome.schema_errors
+                else "exhausted debug retry budget"
             ),
         },
+        fix_attempts=fix_attempts,
     )
