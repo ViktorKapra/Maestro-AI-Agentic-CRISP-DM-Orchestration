@@ -120,3 +120,10 @@ pytest
 
 See [`.env.example`](.env.example) for `MODEL`, `MAX_TOKENS_PER_RUN`, `MAADS_TRACE`,
 `MAADS_TRACE_LLM_IO`, `MAADS_PROGRESS`, and Ollama settings.
+
+Success for this project is three deliverables, not just a pipeline that runs:
+
+Complete code — a complete, working multi-agent system that is general: the same agent code and prompts run all three demonstration Kaggle cases (Titanic, House Prices, Disaster Tweets), with only the per-case YAML config differing. Agents that emit code actually execute it; the CRISP-DM loops fire when warranted.
+Forecast — the actual predictions for each case: a Kaggle-valid submission.csv that beats the trivial baseline, with the observed public-leaderboard score recorded.
+Paper — a short (4–8 page) conference-style paper that situates the work against prior automated-data-science systems and honestly reports results across all cases combined (scores, per-agent/per-provider token cost, what didn't work).
+A single completed case delivers pillar 2 for that case — one valid, scored forecast plus the audit trail (final_state.json, trace/) proving how the system produced it. Doing that on three datasets with untouched agent code proves pillar 1; the paper (3) is written once, at the end, over all the evidence.
