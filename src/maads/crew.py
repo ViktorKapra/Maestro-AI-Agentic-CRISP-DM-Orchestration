@@ -83,8 +83,17 @@ def make_agent(agent_name: str, dataset_name: str = "") -> Agent:
 
 
 def _extract_json(text: str) -> dict | None:
-    """Parse JSON, with one lenient repair pass (strip fences / find the object)."""
+    """Parse JSON, with one lenient repair pass (strip fences / find the object).
+
+    Reasoning models (e.g. minimax-m3) prepend a ``<think>...</think>`` block whose
+    prose contains braces, which would otherwise derail the greedy object search
+    below. Strip such blocks first so only the real answer is parsed.
+    """
     if not text or not str(text).strip():
+        return None
+    text = re.sub(r"<think(?:ing)?>.*?</think(?:ing)?>", "", str(text),
+                  flags=re.DOTALL | re.IGNORECASE).strip()
+    if not text:
         return None
     try:
         return json.loads(text)

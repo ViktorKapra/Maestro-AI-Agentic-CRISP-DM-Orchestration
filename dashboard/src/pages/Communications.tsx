@@ -17,12 +17,12 @@ export function Communications({ caseId, highlightCommId }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-amber-900/50 bg-amber-950/20 px-4 py-2 text-sm text-amber-200/90">
-        Contains full system prompts and LLM responses — local use only.
+      <div className="rounded-2xl border border-rose-300 bg-rose-100/70 px-4 py-2 text-sm text-rose-700 font-semibold">
+        🔒 Contains full system prompts and LLM responses — local use only, keep it secret bestie! 🤫
       </div>
 
       {!communications?.length && (
-        <p className="text-slate-500 text-sm">No LLM communications yet.</p>
+        <p className="text-slate-500 text-sm">🫧 No LLM communications yet…</p>
       )}
 
       <div className="space-y-3">

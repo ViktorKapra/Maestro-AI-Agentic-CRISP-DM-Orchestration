@@ -19,29 +19,29 @@ export function Overview({ caseId }: Props) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-      <section className="rounded-xl border border-surface-border bg-surface-raised p-5 space-y-4">
-        <h2 className="text-lg font-medium">Progress</h2>
+      <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 space-y-4 glow-card">
+        <h2 className="text-lg font-bold">📊 Progress</h2>
         <ProgressRail status={status} />
         {status && (
           <div className="space-y-2 text-sm">
             <p>
-              <span className="text-slate-400">Phase:</span>{" "}
+              <span className="text-slate-400 font-semibold">🌷 Phase:</span>{" "}
               {status.phase} — {status.phase_name}
             </p>
             <p>
-              <span className="text-slate-400">Substep:</span>{" "}
+              <span className="text-slate-400 font-semibold">🧩 Substep:</span>{" "}
               {status.substep} — {status.substep_name}
             </p>
-            <p className="text-slate-300">{status.activity}</p>
+            <p className="text-slate-300">💭 {status.activity}</p>
             {status.halted && (
-              <p className="text-red-400">Halted: {status.halt_reason}</p>
+              <p className="text-status-halted font-semibold">😵 Halted: {status.halt_reason}</p>
             )}
           </div>
         )}
       </section>
 
-      <section className="rounded-xl border border-surface-border bg-surface-raised p-5">
-        <h2 className="text-lg font-medium mb-4">Token spend</h2>
+      <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
+        <h2 className="text-lg font-bold mb-4">🪙 Token spend</h2>
         <TokenChart
           summary={summary}
           communications={communications}
@@ -49,21 +49,21 @@ export function Overview({ caseId }: Props) {
         />
       </section>
 
-      <section className="rounded-xl border border-surface-border bg-surface-raised p-5 lg:col-span-2">
-        <h2 className="text-lg font-medium mb-2">Activity</h2>
+      <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 lg:col-span-2 glow-card">
+        <h2 className="text-lg font-bold mb-2">💬 Activity</h2>
         <p className="text-sm text-slate-400">
-          {status?.activity ?? "Waiting for status…"}
+          {status?.activity ?? "Waiting for status… 🕰️"}
         </p>
         {lastComm && (
           <p className="text-sm text-slate-500 mt-2">
-            Last LLM turn:{" "}
+            🦄 Last LLM turn:{" "}
             <span className="font-mono text-accent-muted">{lastComm.id}</span>{" "}
             ({lastComm.agent_name}, {lastComm.tokens?.total ?? "?"} tokens)
           </p>
         )}
         {summary && summary.parse_failures > 0 && (
-          <p className="text-sm text-red-400 mt-2">
-            {summary.parse_failures} parse failure(s) detected
+          <p className="text-sm text-status-halted font-semibold mt-2">
+            😬 {summary.parse_failures} parse failure(s) detected
           </p>
         )}
       </section>

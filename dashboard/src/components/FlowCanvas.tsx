@@ -15,10 +15,10 @@ import "@xyflow/react/dist/style.css";
 import type { GraphPayload } from "../shared/types";
 
 const STATE_STYLES: Record<string, string> = {
-  idle: "border-slate-600 bg-surface-raised",
-  active: "border-status-running bg-green-950/40 node-active",
-  done: "border-slate-500 bg-surface-raised opacity-80",
-  error: "border-status-halted bg-red-950/40",
+  idle: "border-surface-border bg-surface-raised",
+  active: "border-status-running bg-fuchsia-100 node-active",
+  done: "border-status-complete bg-surface-raised opacity-80",
+  error: "border-status-halted bg-rose-100",
 };
 
 function AgentNode({ data }: NodeProps) {
@@ -77,44 +77,44 @@ export function FlowCanvas({ graph }: Props) {
         target: e.target,
         animated: e.animated,
         style: {
-          stroke: e.edgeType === "dispatch" ? "#475569" : "#60a5fa",
+          stroke: e.edgeType === "dispatch" ? "#e9a8d6" : "#d6409f",
           strokeWidth: e.animated ? 2.5 : 1.5,
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: e.animated ? "#60a5fa" : "#475569",
+          color: e.animated ? "#d6409f" : "#e9a8d6",
         },
         label: e.communication_id ?? undefined,
-        labelStyle: { fill: "#94a3b8", fontSize: 10 },
+        labelStyle: { fill: "#a98fb8", fontSize: 10 },
       })),
     [graph],
   );
 
   if (!graph || nodes.length === 0) {
     return (
-      <div className="flex h-[480px] items-center justify-center rounded-lg border border-surface-border bg-surface-raised text-slate-500">
-        No architecture data yet — start a run or wait for trace export.
+      <div className="flex h-[480px] items-center justify-center rounded-2xl border border-surface-border bg-surface-raised text-slate-500">
+        🦋 No architecture data yet — start a run or wait for trace export.
       </div>
     );
   }
 
   return (
-    <div className="h-[520px] rounded-lg border border-surface-border overflow-hidden">
+    <div className="h-[520px] rounded-2xl border border-surface-border overflow-hidden glow-card">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        colorMode="dark"
+        colorMode="light"
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#2d3a4f" gap={20} />
+        <Background color="#f0abdc" gap={20} />
         <Controls />
         <MiniMap
           nodeColor={(n) =>
-            n.data?.state === "active" ? "#22c55e" : "#334155"
+            n.data?.state === "active" ? "#d946ef" : "#e9a8d6"
           }
-          maskColor="rgba(15, 20, 25, 0.8)"
+          maskColor="rgba(253, 244, 255, 0.7)"
         />
       </ReactFlow>
     </div>

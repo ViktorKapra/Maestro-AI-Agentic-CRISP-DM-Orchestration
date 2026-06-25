@@ -41,18 +41,18 @@ export function Timeline({ caseId, onOpenComm }: Props) {
     <div className="space-y-4">
       <input
         type="search"
-        placeholder="Filter by type, name, or comm_id…"
+        placeholder="🔎 Filter by type, name, or comm_id…"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
-        className="w-full max-w-md rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm"
+        className="w-full max-w-md rounded-full border border-surface-border bg-surface-raised px-4 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
       />
 
-      <p className="text-xs text-slate-500">
-        {events.length} events
-        {trace?.ended_at ? " · run complete" : " · run in progress"}
+      <p className="text-xs text-slate-500 font-medium">
+        ⏳ {events.length} events
+        {trace?.ended_at ? " · run complete 🎀" : " · run in progress 💫"}
       </p>
 
-      <div className="rounded-xl border border-surface-border overflow-hidden">
+      <div className="rounded-2xl border border-surface-border overflow-hidden glow-card">
         <table className="w-full text-sm">
           <thead className="bg-surface-raised text-slate-400 text-left">
             <tr>

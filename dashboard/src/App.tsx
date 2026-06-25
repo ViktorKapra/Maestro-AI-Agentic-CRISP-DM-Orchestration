@@ -7,10 +7,10 @@ import { Architecture } from "./pages/Architecture";
 import { Timeline } from "./pages/Timeline";
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "communications", label: "Communications" },
-  { id: "architecture", label: "Architecture" },
-  { id: "timeline", label: "Timeline" },
+  { id: "overview", label: "💖 Overview" },
+  { id: "communications", label: "💬 Communications" },
+  { id: "architecture", label: "🦋 Architecture" },
+  { id: "timeline", label: "⏳ Timeline" },
 ];
 
 function statusDot(status: RunStatus | undefined) {
@@ -20,10 +20,10 @@ function statusDot(status: RunStatus | undefined) {
 }
 
 function statusLabel(status: RunStatus | undefined) {
-  if (status === "running") return "Running";
-  if (status === "halted") return "Halted";
-  if (status === "complete") return "Complete";
-  return "Unknown";
+  if (status === "running") return "Running ✨";
+  if (status === "halted") return "Halted 😵";
+  if (status === "complete") return "Complete 🎀";
+  return "Unknown 🤔";
 }
 
 export default function App() {
@@ -63,7 +63,9 @@ export default function App() {
   if (error) {
     return (
       <div className="p-8 text-center">
-        <p className="text-red-400">Cannot reach API — is the dashboard server running?</p>
+        <p className="text-status-halted font-semibold">
+          😢 Cannot reach API — is the dashboard server running, bestie?
+        </p>
         <p className="text-sm text-slate-500 mt-2">
           Run: <code className="text-accent-muted">python -m maads dashboard --no-open</code>
         </p>
@@ -73,16 +75,18 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b border-surface-border bg-surface-raised px-6 py-4">
+      <header className="border-b border-surface-border bg-surface-raised/80 backdrop-blur px-6 py-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-4 justify-between max-w-7xl mx-auto">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold tracking-tight">
-              MAADS Trace
+            <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-fuchsia-500 via-pink-500 to-purple-500 bg-clip-text text-transparent">
+              🌸 MAADS Trace ✨
             </h1>
             {activeCase && (
-              <span className="flex items-center gap-2 text-sm">
+              <span className="flex items-center gap-2 text-sm font-semibold rounded-full bg-surface px-3 py-1 border border-surface-border">
                 <span
-                  className={`h-2 w-2 rounded-full ${statusDot(activeCase.status)}`}
+                  className={`h-2.5 w-2.5 rounded-full ${statusDot(activeCase.status)} ${
+                    activeCase.status === "running" ? "node-active" : ""
+                  }`}
                 />
                 {statusLabel(activeCase.status)}
               </span>
@@ -93,33 +97,33 @@ export default function App() {
             value={caseId ?? ""}
             onChange={(e) => setCaseId(e.target.value)}
             disabled={isLoading}
-            className="rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-sm"
+            className="rounded-full border border-surface-border bg-surface px-4 py-1.5 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
           >
-            {!cases?.length && <option value="">No cases</option>}
+            {!cases?.length && <option value="">No cases 😴</option>}
             {cases?.map((c) => (
               <option key={c.case_id} value={c.case_id}>
-                {c.case_id} ({c.status})
+                🎀 {c.case_id} ({c.status})
               </option>
             ))}
           </select>
         </div>
 
         {activeCase && (
-          <p className="text-sm text-slate-400 mt-2 max-w-7xl mx-auto">
-            Phase {activeCase.phase} — {activeCase.phase_name} ·{" "}
+          <p className="text-sm text-slate-400 mt-2 max-w-7xl mx-auto font-medium">
+            🌷 Phase {activeCase.phase} — {activeCase.phase_name} ·{" "}
             {activeCase.completed_substeps}/{activeCase.total_substeps} substeps
           </p>
         )}
 
-        <nav className="flex gap-1 mt-4 max-w-7xl mx-auto">
+        <nav className="flex flex-wrap gap-2 mt-4 max-w-7xl mx-auto">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`rounded-lg px-4 py-2 text-sm transition-colors ${
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition-all ${
                 tab === t.id
-                  ? "bg-accent text-white"
+                  ? "bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white shadow-md scale-105"
                   : "text-slate-400 hover:bg-surface-border hover:text-slate-200"
               }`}
             >
@@ -131,7 +135,7 @@ export default function App() {
 
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
         {!caseId ? (
-          <p className="text-slate-500">Select a case or run the pipeline first.</p>
+          <p className="text-slate-500">💫 Select a case or run the pipeline first, queen!</p>
         ) : (
           <>
             {tab === "overview" && <Overview caseId={caseId} />}
