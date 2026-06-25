@@ -124,6 +124,65 @@ class EvaluationBundle(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+def coerce_evaluation_bundle(
+    raw: dict[str, Any],
+    *,
+    problem_type: str,
+    class_labels: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Normalize sandbox/LLM evaluation_bundle dicts into EvaluationBundle shape."""
+    bundle = dict(raw)
+    if not bundle.get("problem_type"):
+        bundle["problem_type"] = problem_type
+
+    labels = bundle.get("class_labels")
+    if not isinstance(labels, dict):
+        labels = dict(class_labels or {})
+        bundle["class_labels"] = labels
+
+    metrics_in = bundle.get("metrics")
+    metrics: dict[str, float] = {}
+    cv: dict[str, Any] = dict(bundle.get("cv") or {})
+
+    if isinstance(metrics_in, dict):
+        metrics_copy = dict(metrics_in)
+        per_class = metrics_copy.pop("per_class", None)
+        if isinstance(per_class, dict):
+            for lbl_key, scores in per_class.items():
+                if not isinstance(scores, dict):
+                    continue
+                name = labels.get(str(lbl_key), str(lbl_key))
+                for metric_name, value in scores.items():
+                    if isinstance(value, (int, float)):
+                        metrics[f"{metric_name}_{name}"] = float(value)
+        for key, value in metrics_copy.items():
+            if key == "cv_f1_mean" and isinstance(value, (int, float)):
+                cv["mean"] = float(value)
+            elif key == "cv_f1_std" and isinstance(value, (int, float)):
+                cv["std"] = float(value)
+            elif key.startswith("cv_") and isinstance(value, (int, float)):
+                cv[key[3:]] = float(value)
+            elif isinstance(value, (int, float)):
+                metrics[key] = float(value)
+
+    bundle["metrics"] = metrics
+    if cv:
+        bundle["cv"] = cv
+
+    figures = bundle.get("figures")
+    if isinstance(figures, dict):
+        bundle["figures"] = [str(path) for path in figures.values()]
+    elif isinstance(figures, list):
+        bundle["figures"] = [str(path) for path in figures]
+    else:
+        bundle["figures"] = []
+
+    warnings = bundle.get("warnings")
+    bundle["warnings"] = warnings if isinstance(warnings, list) else []
+
+    return bundle
+
+
 class ModelRun(BaseModel):
     technique: str
     parameter_settings: dict[str, Any] = Field(default_factory=dict)

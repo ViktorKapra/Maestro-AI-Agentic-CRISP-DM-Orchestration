@@ -307,7 +307,11 @@ def apply_response(
     elif substep == "3.1":
         rationale = dp.get("rationale_for_inclusion_exclusion")
         if rationale:
-            state.dp.rationale_for_inclusion_exclusion = rationale
+            from maads.text_normalize import normalize_inclusion_rationale
+
+            state.dp.rationale_for_inclusion_exclusion = normalize_inclusion_rationale(
+                rationale,
+            )
             fields.append("dp.rationale_for_inclusion_exclusion")
     elif substep == "3.2":
         cleaning = execution_or_llm(execution, dp, "data_cleaning_report")

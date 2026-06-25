@@ -61,3 +61,44 @@ def dedupe_nested_dict(base: dict[str, Any], overlay: dict[str, Any]) -> dict[st
         else:
             result[key] = value
     return result
+
+
+def normalize_inclusion_rationale(value: Any) -> dict[str, Any]:
+    """Coerce LLM inclusion/exclusion rationale into a dict for state and reports."""
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        return {"summary": value}
+    if isinstance(value, list):
+        included: list[str] = []
+        excluded: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                included.append(item)
+            elif isinstance(item, dict):
+                name = (
+                    item.get("field")
+                    or item.get("column")
+                    or item.get("name")
+                    or item.get("feature")
+                )
+                if not name:
+                    continue
+                bucket = str(item.get("decision") or item.get("action") or "include").lower()
+                if bucket.startswith("excl"):
+                    excluded.append(str(name))
+                else:
+                    included.append(str(name))
+        out: dict[str, Any] = {}
+        if included:
+            out["included"] = included
+            out["features_included"] = included
+        if excluded:
+            out["excluded"] = excluded
+            out["features_excluded"] = excluded
+        if not out:
+            out["summary"] = ", ".join(str(item) for item in value[:12])
+        return out
+    return {"summary": str(value)}

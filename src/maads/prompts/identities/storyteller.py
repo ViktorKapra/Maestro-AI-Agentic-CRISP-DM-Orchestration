@@ -7,8 +7,6 @@ from pathlib import Path
 from maads.output_contracts import schema_hint_for_agent
 from maads.state import CrispDMState, SUBSTEP_NAMES
 
-STORYTELLER_OUTPUT_SCHEMA_HINT = schema_hint_for_agent("storyteller")
-
 _SUBSTEP_ASSIGNMENTS: dict[str, dict] = {
     "6.2": {
         "objective": "Generate report evidence and storytelling specification from evaluation_bundle",
@@ -55,4 +53,4 @@ def format_storyteller_task(
             " Build story_spec from evaluation_bundle in the state view. "
             "Every interpretation must cite a metric that exists in the bundle."
         )
-    return instruction, STORYTELLER_OUTPUT_SCHEMA_HINT
+    return instruction, schema_hint_for_agent("storyteller", substep=substep)

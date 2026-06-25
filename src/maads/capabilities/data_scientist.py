@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from maads.baselines import (
     _ASSESS_SRC,
     _EXPLORE_SRC,
@@ -22,7 +24,31 @@ from maads.capabilities.shared import (
     record_degraded,
     run_snippet as _run_snippet,
 )
-from maads.state import CrispDMState, EvaluationBundle, ModelRun
+from maads.state import CrispDMState, EvaluationBundle, ModelRun, coerce_evaluation_bundle
+
+
+def _evaluation_bundle_contract(
+    payload: dict[str, Any],
+    *,
+    problem_type: str,
+    class_labels: dict[str, str],
+) -> list[str]:
+    if not _has_keys(payload, "evaluation_bundle"):
+        return ["missing evaluation_bundle key"]
+    raw = payload.get("evaluation_bundle")
+    if not isinstance(raw, dict):
+        return ["evaluation_bundle must be an object"]
+    try:
+        EvaluationBundle.model_validate(
+            coerce_evaluation_bundle(
+                raw,
+                problem_type=problem_type,
+                class_labels=class_labels,
+            ),
+        )
+    except ValidationError as exc:
+        return [str(exc).split("\n")[0]]
+    return []
 
 
 def execution_evidence(
@@ -117,12 +143,17 @@ def execution_evidence(
         idc = state.config.id_column
         problem_type = state.config.problem_type
         figures_dir = str((artifact_dir / "figures").resolve())
-        class_labels = json.dumps(state.config.class_labels or {})
+        class_labels_map = state.config.class_labels or {}
         assess_fallback = lambda: _run_snippet(
             pyexec, _ASSESS_SRC,
             __TRAIN__=dataset_train, __TARGET__=target, __ID__=idc,
             __PROBLEM_TYPE__=problem_type, __FIGURES_DIR__=figures_dir,
-            __CLASS_LABELS__=class_labels,
+            __CLASS_LABELS__=json.dumps(class_labels_map),
+        )
+        bundle_contract = lambda p: _evaluation_bundle_contract(
+            p,
+            problem_type=problem_type,
+            class_labels=class_labels_map,
         )
         res = run_authored_code(
             pyexec=pyexec, agent_name="data_scientist", state=state,
@@ -131,17 +162,23 @@ def execution_evidence(
                         "out-of-fold predictions via stratified CV, computes problem-type-appropriate "
                         "metrics (for binary classification: accuracy, balanced accuracy, per-class "
                         "precision/recall/F1, confusion matrix), saves figures under FIGURES_DIR, "
-                        "and prints evaluation_bundle. Use CLASS_LABELS for human-readable names.",
+                        "and prints evaluation_bundle. Use CLASS_LABELS for human-readable names. "
+                        "evaluation_bundle must include problem_type, metrics (flat float map), "
+                        "confusion_matrix, class_labels, figures (list of paths), and optional cv.",
             header_vars={
                 "TRAIN_PARQUET": dataset_train,
                 "TARGET": target,
                 "ID_COL": idc,
                 "PROBLEM_TYPE": problem_type,
                 "FIGURES_DIR": figures_dir,
-                "CLASS_LABELS": class_labels,
+                "CLASS_LABELS": json.dumps(class_labels_map),
             },
-            contract=lambda p: _has_keys(p, "evaluation_bundle"),
-            contract_hint="Required key: evaluation_bundle (dict with metrics, confusion_matrix, figures).",
+            contract=bundle_contract,
+            contract_hint=(
+                "Required key: evaluation_bundle with problem_type, metrics (numbers only), "
+                "confusion_matrix, figures (list of path strings). "
+                "Do not nest per_class metrics or use a dict for figures."
+            ),
             fallback=assess_fallback,
             fallback_code=_ASSESS_SRC,
             artifact_dir=artifact_dir,
@@ -251,7 +288,19 @@ def apply_response(
                 or "selected: best CV score"
             )
             if bundle_raw:
-                best.evaluation_bundle = EvaluationBundle.model_validate(bundle_raw)
+                try:
+                    best.evaluation_bundle = EvaluationBundle.model_validate(
+                        coerce_evaluation_bundle(
+                            bundle_raw,
+                            problem_type=state.config.problem_type,
+                            class_labels=state.config.class_labels or {},
+                        ),
+                    )
+                except ValidationError as exc:
+                    return StateDelta(
+                        notes=f"DS 4.4: invalid evaluation_bundle: {exc}",
+                        failed=True,
+                    )
             state.md.chosen_model = best
             fields.append("md.chosen_model")
         elif not bundle_raw:
