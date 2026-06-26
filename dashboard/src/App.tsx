@@ -13,8 +13,10 @@ import { Prompts } from "./pages/Prompts";
 import { StateShape } from "./pages/StateShape";
 import { LoopLogic } from "./pages/LoopLogic";
 import { FailureModes } from "./pages/FailureModes";
+import { Launch } from "./pages/Launch";
 
 const TABS: { id: TabId; label: string }[] = [
+  { id: "launch", label: "🚀 Launch" },
   { id: "overview", label: "💖 Overview" },
   { id: "process", label: "🌸 Process" },
   { id: "knowledge", label: "📚 Knowledge" },
@@ -150,8 +152,20 @@ export default function App() {
       </header>
 
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
-        {!caseId ? (
-          <p className="text-slate-500">💫 Select a case or run the pipeline first, queen!</p>
+        {tab === "launch" ? (
+          <Launch onLaunched={(id) => setCaseId(id)} />
+        ) : tab === "framework" ? (
+          <Framework />
+        ) : tab === "prompts" ? (
+          <Prompts />
+        ) : tab === "state_shape" ? (
+          <StateShape />
+        ) : tab === "loop_logic" ? (
+          <LoopLogic />
+        ) : tab === "failure_modes" ? (
+          <FailureModes />
+        ) : !caseId ? (
+          <p className="text-slate-500">💫 Select a case or start one from the Launch tab!</p>
         ) : (
           <>
             {tab === "overview" && <Overview caseId={caseId} />}
@@ -168,11 +182,6 @@ export default function App() {
             {tab === "timeline" && (
               <Timeline caseId={caseId} onOpenComm={openComm} />
             )}
-            {tab === "framework" && <Framework />}
-            {tab === "prompts" && <Prompts />}
-            {tab === "state_shape" && <StateShape />}
-            {tab === "loop_logic" && <LoopLogic />}
-            {tab === "failure_modes" && <FailureModes />}
           </>
         )}
       </main>
