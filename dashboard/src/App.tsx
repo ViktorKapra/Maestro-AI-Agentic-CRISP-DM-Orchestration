@@ -8,6 +8,11 @@ import { Communications } from "./pages/Communications";
 import { Architecture } from "./pages/Architecture";
 import { Timeline } from "./pages/Timeline";
 import { Knowledge } from "./pages/Knowledge";
+import { Framework } from "./pages/Framework";
+import { Prompts } from "./pages/Prompts";
+import { StateShape } from "./pages/StateShape";
+import { LoopLogic } from "./pages/LoopLogic";
+import { FailureModes } from "./pages/FailureModes";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "💖 Overview" },
@@ -17,6 +22,11 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "communications", label: "💬 Communications" },
   { id: "architecture", label: "🦋 Architecture" },
   { id: "timeline", label: "⏳ Timeline" },
+  { id: "framework", label: "🔬 Framework" },
+  { id: "prompts", label: "📝 Prompts" },
+  { id: "state_shape", label: "🏗️ State Shape" },
+  { id: "loop_logic", label: "🔄 Loop Logic" },
+  { id: "failure_modes", label: "🩹 Failures" },
 ];
 
 function statusDot(status: RunStatus | undefined) {
@@ -158,6 +168,11 @@ export default function App() {
             {tab === "timeline" && (
               <Timeline caseId={caseId} onOpenComm={openComm} />
             )}
+            {tab === "framework" && <Framework />}
+            {tab === "prompts" && <Prompts />}
+            {tab === "state_shape" && <StateShape />}
+            {tab === "loop_logic" && <LoopLogic />}
+            {tab === "failure_modes" && <FailureModes />}
           </>
         )}
       </main>
