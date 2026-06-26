@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { TraceEvent } from "../shared/types";
 import { useTraceSummary } from "../hooks/useCasePolling";
+import { useTheme } from "../shared/theme";
 
 interface Props {
   caseId: string;
@@ -24,6 +25,7 @@ function formatEvent(evt: TraceEvent): string {
 }
 
 export function Timeline({ caseId, onOpenComm }: Props) {
+  const { clean } = useTheme();
   const { data: trace } = useTraceSummary(caseId);
   const [filter, setFilter] = useState("");
 
@@ -41,15 +43,15 @@ export function Timeline({ caseId, onOpenComm }: Props) {
     <div className="space-y-4">
       <input
         type="search"
-        placeholder="🔎 Filter by type, name, or comm_id…"
+        placeholder={clean("🔎 Filter by type, name, or comm_id…")}
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         className="w-full max-w-md rounded-full border border-surface-border bg-surface-raised px-4 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
       />
 
       <p className="text-xs text-slate-500 font-medium">
-        ⏳ {events.length} events
-        {trace?.ended_at ? " · run complete 🎀" : " · run in progress 💫"}
+        {clean("⏳")} {events.length} events
+        {trace?.ended_at ? clean(" · run complete 🎀") : clean(" · run in progress 💫")}
       </p>
 
       <div className="rounded-2xl border border-surface-border overflow-hidden glow-card">

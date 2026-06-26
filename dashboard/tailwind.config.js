@@ -7,33 +7,37 @@ export default {
         sans: ['"Quicksand"', "ui-rounded", "system-ui", "sans-serif"],
       },
       colors: {
-        // 🌸 Lavender-rose light theme — soft, girly, easy on the eyes.
+        // 🎨 All theme tokens are CSS variables holding *RGB channels*
+        // (e.g. "255 255 255"). The `<alpha-value>` placeholder lets Tailwind
+        // opacity modifiers (bg-surface/80, accent/40, …) keep working.
+        // The actual values live in index.css and switch with [data-theme].
         surface: {
-          DEFAULT: "#fdf4ff", // lightest lavender (inputs, code blocks)
-          raised: "#ffffff", // cards / header (with a rosy border)
-          border: "#f1cde9", // rose-lavender hairline
+          DEFAULT: "rgb(var(--surface) / <alpha-value>)",
+          raised: "rgb(var(--surface-raised) / <alpha-value>)",
+          border: "rgb(var(--surface-border) / <alpha-value>)",
         },
         accent: {
-          DEFAULT: "#d6409f", // rose-fuchsia (buttons, active bits)
-          muted: "#9333ea", // deep lavender (readable text links)
+          DEFAULT: "rgb(var(--accent) / <alpha-value>)",
+          muted: "rgb(var(--accent-muted) / <alpha-value>)",
         },
         status: {
-          running: "#d946ef", // fuchsia sparkle = working
-          halted: "#f43f5e", // rose-red = uh oh
-          complete: "#a78bfa", // soft lavender = done
+          running: "rgb(var(--status-running) / <alpha-value>)",
+          halted: "rgb(var(--status-halted) / <alpha-value>)",
+          complete: "rgb(var(--status-complete) / <alpha-value>)",
         },
-        // Slate is used everywhere for text; remap it so the dark-theme
-        // utility classes read as dark-on-light plum tones instead.
+        // Slate is used everywhere for text; remap each shade to a themed
+        // variable so text flips correctly between the light-pink theme
+        // (dark plum on light) and the business theme (light on dark).
         slate: {
-          100: "#3b1f47", // main body text
-          200: "#4a2a57",
-          300: "#5d3a6b", // code / transcript text
-          400: "#8b6f9e", // muted labels
-          500: "#a98fb8", // very muted
-          600: "#c9a9d6", // soft borders (flow nodes)
-          700: "#b794c9",
-          800: "#5d3a6b",
-          900: "#3b1f47",
+          100: "rgb(var(--slate-100) / <alpha-value>)",
+          200: "rgb(var(--slate-200) / <alpha-value>)",
+          300: "rgb(var(--slate-300) / <alpha-value>)",
+          400: "rgb(var(--slate-400) / <alpha-value>)",
+          500: "rgb(var(--slate-500) / <alpha-value>)",
+          600: "rgb(var(--slate-600) / <alpha-value>)",
+          700: "rgb(var(--slate-700) / <alpha-value>)",
+          800: "rgb(var(--slate-800) / <alpha-value>)",
+          900: "rgb(var(--slate-900) / <alpha-value>)",
         },
       },
     },

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CommunicationRecord } from "../shared/types";
+import { useTheme } from "../shared/theme";
 
 interface Props {
   record: CommunicationRecord;
@@ -19,6 +20,7 @@ function extractText(value: unknown): string {
 }
 
 export function CommTurn({ record, highlighted, onSelect }: Props) {
+  const { clean } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const parseOk = record.outcome?.parse_ok;
   const jsonValid = record.outcome?.json_valid;
@@ -48,7 +50,7 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
       <header className="flex flex-wrap items-center gap-2 mb-2">
         <span className="font-mono text-xs text-accent-muted font-semibold">{record.id}</span>
         <span className="rounded-full bg-surface-border px-2 py-0.5 text-xs font-semibold">
-          🤖 {record.agent_name || record.role || "agent"}
+          {clean("🤖")} {record.agent_name || record.role || "agent"}
         </span>
         {record.model && (
           <span className="text-xs text-slate-500">{record.model}</span>
@@ -58,12 +60,12 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
         )}
         {failed && (
           <span className="rounded-full bg-rose-100 text-rose-700 border border-rose-300 px-2 py-0.5 text-xs font-semibold">
-            😵 {schemaOnlyFailure ? "schema failed" : "parse failed"}
+            {clean("😵")} {schemaOnlyFailure ? "schema failed" : "parse failed"}
           </span>
         )}
         {!record.closed && (
           <span className="rounded-full bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-300 px-2 py-0.5 text-xs font-semibold">
-            ✨ in flight
+            {clean("✨")} in flight
           </span>
         )}
       </header>
@@ -87,7 +89,7 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
         }}
         className="text-sm font-semibold text-accent-muted hover:text-accent"
       >
-        {expanded ? "🙈 Hide transcript" : "👀 Show transcript"}
+        {expanded ? clean("🙈 Hide transcript") : clean("👀 Show transcript")}
       </button>
 
       {expanded && (

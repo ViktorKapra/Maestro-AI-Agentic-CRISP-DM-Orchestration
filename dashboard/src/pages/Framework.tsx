@@ -1,8 +1,11 @@
+import { useTheme } from "../shared/theme";
+
 export function Framework() {
+  const { clean } = useTheme();
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
-        <h2 className="text-lg font-bold text-slate-200 mb-1">🔬 Why CrewAI?</h2>
+        <h2 className="text-lg font-bold text-slate-200 mb-1">{clean("🔬 Why CrewAI?")}</h2>
         <p className="text-sm text-slate-400">
           MAADS requires <em>role-differentiated</em>, <em>sequential</em>, <em>tool-using</em> agents
           that share state without chatting freely — exactly the regime CrewAI was designed for.
@@ -12,7 +15,7 @@ export function Framework() {
 
       {/* Design requirements */}
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
-        <h3 className="text-sm font-bold text-slate-300 mb-3">🎯 Our Hard Requirements</h3>
+        <h3 className="text-sm font-bold text-slate-300 mb-3">{clean("🎯 Our Hard Requirements")}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {[
             { req: "Role specialisation", why: "CRISP-DM phases have distinct expertise — mixing them in one prompt degrades output quality" },
@@ -32,12 +35,12 @@ export function Framework() {
 
       {/* Framework comparison */}
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card overflow-x-auto">
-        <h3 className="text-sm font-bold text-slate-300 mb-3">⚖️ Framework Comparison</h3>
+        <h3 className="text-sm font-bold text-slate-300 mb-3">{clean("⚖️ Framework Comparison")}</h3>
         <table className="w-full text-xs border-collapse min-w-[560px]">
           <thead>
             <tr className="border-b border-surface-border text-left">
               <th className="pb-2 text-slate-400 font-semibold pr-4">Capability</th>
-              <th className="pb-2 text-fuchsia-300 font-semibold pr-4">CrewAI ✓</th>
+              <th className="pb-2 text-fuchsia-300 font-semibold pr-4">{clean("CrewAI ✓")}</th>
               <th className="pb-2 text-slate-500 font-semibold pr-4">AutoGen</th>
               <th className="pb-2 text-slate-500 font-semibold pr-4">LangGraph</th>
               <th className="pb-2 text-slate-500 font-semibold">MetaGPT</th>
@@ -55,10 +58,10 @@ export function Framework() {
             ].map(([cap, crew, autogen, langgraph, metagpt]) => (
               <tr key={cap} className="border-b border-surface-border/40">
                 <td className="py-2 pr-4 text-slate-400">{cap}</td>
-                <td className="py-2 pr-4 text-green-400 font-medium">{crew}</td>
-                <td className="py-2 pr-4 text-slate-500">{autogen}</td>
-                <td className="py-2 pr-4 text-slate-500">{langgraph}</td>
-                <td className="py-2 text-slate-500">{metagpt}</td>
+                <td className="py-2 pr-4 text-green-400 font-medium">{clean(crew)}</td>
+                <td className="py-2 pr-4 text-slate-500">{clean(autogen)}</td>
+                <td className="py-2 pr-4 text-slate-500">{clean(langgraph)}</td>
+                <td className="py-2 text-slate-500">{clean(metagpt)}</td>
               </tr>
             ))}
           </tbody>
@@ -67,7 +70,7 @@ export function Framework() {
 
       {/* Scientific basis */}
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
-        <h3 className="text-sm font-bold text-slate-300 mb-4">📚 Scientific Basis</h3>
+        <h3 className="text-sm font-bold text-slate-300 mb-4">{clean("📚 Scientific Basis")}</h3>
         <div className="space-y-4">
           {[
             {
@@ -150,7 +153,7 @@ export function Framework() {
 
       {/* How CrewAI maps to our design */}
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
-        <h3 className="text-sm font-bold text-slate-300 mb-3">🗺️ CrewAI → MAADS Mapping</h3>
+        <h3 className="text-sm font-bold text-slate-300 mb-3">{clean("🗺️ CrewAI → MAADS Mapping")}</h3>
         <div className="space-y-2 text-xs">
           {[
             ["agents.yaml role / goal / backstory_file", "Agent persona and system prompt loaded at construction via agent_for()"],

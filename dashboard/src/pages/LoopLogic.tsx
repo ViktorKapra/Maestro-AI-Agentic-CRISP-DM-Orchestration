@@ -1,4 +1,7 @@
+import { useTheme } from "../shared/theme";
+
 export function LoopLogic() {
+  const { clean } = useTheme();
   const loops = [
     {
       label: "A",
@@ -82,7 +85,7 @@ export function LoopLogic() {
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
-        <h2 className="text-lg font-bold text-slate-200 mb-1">🔄 Loop Logic</h2>
+        <h2 className="text-lg font-bold text-slate-200 mb-1">{clean("🔄 Loop Logic")}</h2>
         <p className="text-sm text-slate-400">
           CRISP-DM is iterative, not waterfall. The PM is the sole decision-maker for loop
           firing — agents only <em>recommend</em> loops via state signals. A deterministic guard
@@ -138,7 +141,7 @@ export function LoopLogic() {
               >
                 Loop {loop.label}
               </span>
-              <span className="text-lg">{loop.emoji}</span>
+              <span className="text-lg">{clean(loop.emoji)}</span>
               <span className="text-slate-300 text-sm font-semibold">{loop.from}</span>
             </div>
 
@@ -187,7 +190,7 @@ export function LoopLogic() {
       {/* PM directive format */}
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
         <h3 className="text-sm font-bold text-slate-300 mb-3">
-          📤 PM loop_back directive (JSON)
+          {clean("📤 PM loop_back directive (JSON)")}
         </h3>
         <pre className="bg-slate-900/60 rounded-xl p-4 text-xs font-mono text-green-300 overflow-x-auto">{`{
   "action": "loop_back",
@@ -207,7 +210,7 @@ export function LoopLogic() {
       {/* Substep prereq gate */}
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
         <h3 className="text-sm font-bold text-slate-300 mb-3">
-          🔒 Anti-phase-jumping gate (<code className="text-pink-300 text-xs">substep_prereqs_satisfied</code>)
+          {clean("🔒")} Anti-phase-jumping gate (<code className="text-pink-300 text-xs">substep_prereqs_satisfied</code>)
         </h3>
         <div className="space-y-1 text-xs font-mono">
           {[

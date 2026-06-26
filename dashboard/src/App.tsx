@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RunStatus, TabId } from "./shared/types";
+import { BIZ_THEME_NAME, useTheme } from "./shared/theme";
+import type { ThemeId } from "./shared/theme";
 import { useCases } from "./hooks/useCasePolling";
 import { Overview } from "./pages/Overview";
 import { Process } from "./pages/Process";
@@ -31,6 +33,44 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "failure_modes", label: "🩹 Failures" },
 ];
 
+function ThemeToggle({
+  theme,
+  onChange,
+}: {
+  theme: ThemeId;
+  onChange: (t: ThemeId) => void;
+}) {
+  const base = "rounded-full px-3 py-1 transition-all whitespace-nowrap";
+  const active =
+    "bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white shadow";
+  const idle = "text-slate-400 hover:text-slate-200";
+  return (
+    <div
+      role="group"
+      aria-label="Theme"
+      title="Switch the look of the dashboard"
+      className="flex items-center gap-1 rounded-full border border-surface-border bg-surface p-1 text-xs font-semibold shadow-sm"
+    >
+      <button
+        type="button"
+        onClick={() => onChange("pink")}
+        aria-pressed={theme === "pink"}
+        className={`${base} ${theme === "pink" ? active : idle}`}
+      >
+        {theme === "biz" ? "Pink" : "🌸 Pink"}
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("biz")}
+        aria-pressed={theme === "biz"}
+        className={`${base} ${theme === "biz" ? active : idle}`}
+      >
+        {BIZ_THEME_NAME}
+      </button>
+    </div>
+  );
+}
+
 function statusDot(status: RunStatus | undefined) {
   if (status === "running") return "bg-status-running";
   if (status === "halted") return "bg-status-halted";
@@ -49,6 +89,7 @@ export default function App() {
   const [caseId, setCaseId] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("overview");
   const [highlightComm, setHighlightComm] = useState<string | null>(null);
+  const { theme, setTheme, clean } = useTheme();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -82,7 +123,7 @@ export default function App() {
     return (
       <div className="p-8 text-center">
         <p className="text-status-halted font-semibold">
-          😢 Cannot reach API — is the dashboard server running, bestie?
+          {clean("😢 Cannot reach API — is the dashboard server running?")}
         </p>
         <p className="text-sm text-slate-500 mt-2">
           Run: <code className="text-accent-muted">python -m maads dashboard --no-open</code>
@@ -97,7 +138,7 @@ export default function App() {
         <div className="flex flex-wrap items-center gap-4 justify-between max-w-7xl mx-auto">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-fuchsia-500 via-pink-500 to-purple-500 bg-clip-text text-transparent">
-              🌸 MAADS Trace ✨
+              {clean("🌸 MAADS Trace ✨")}
             </h1>
             {activeCase && (
               <span className="flex items-center gap-2 text-sm font-semibold rounded-full bg-surface px-3 py-1 border border-surface-border">
@@ -106,29 +147,34 @@ export default function App() {
                     activeCase.status === "running" ? "node-active" : ""
                   }`}
                 />
-                {statusLabel(activeCase.status)}
+                {clean(statusLabel(activeCase.status))}
               </span>
             )}
           </div>
 
-          <select
-            value={caseId ?? ""}
-            onChange={(e) => setCaseId(e.target.value)}
-            disabled={isLoading}
-            className="rounded-full border border-surface-border bg-surface px-4 py-1.5 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
-          >
-            {!cases?.length && <option value="">No cases 😴</option>}
-            {cases?.map((c) => (
-              <option key={c.case_id} value={c.case_id}>
-                🎀 {c.case_id} ({c.status})
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-3">
+            <select
+              value={caseId ?? ""}
+              onChange={(e) => setCaseId(e.target.value)}
+              disabled={isLoading}
+              className="rounded-full border border-surface-border bg-surface px-4 py-1.5 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+            >
+              {!cases?.length && (
+                <option value="">{clean("No cases 😴")}</option>
+              )}
+              {cases?.map((c) => (
+                <option key={c.case_id} value={c.case_id}>
+                  {clean(`🎀 ${c.case_id} (${c.status})`)}
+                </option>
+              ))}
+            </select>
+            <ThemeToggle theme={theme} onChange={setTheme} />
+          </div>
         </div>
 
         {activeCase && (
           <p className="text-sm text-slate-400 mt-2 max-w-7xl mx-auto font-medium">
-            🌷 Phase {activeCase.phase} — {activeCase.phase_name} ·{" "}
+            {clean("🌷")} Phase {activeCase.phase} — {activeCase.phase_name} ·{" "}
             {activeCase.completed_substeps}/{activeCase.total_substeps} substeps
           </p>
         )}
@@ -145,7 +191,7 @@ export default function App() {
                   : "text-slate-400 hover:bg-surface-border hover:text-slate-200"
               }`}
             >
-              {t.label}
+              {clean(t.label)}
             </button>
           ))}
         </nav>
@@ -165,7 +211,9 @@ export default function App() {
         ) : tab === "failure_modes" ? (
           <FailureModes />
         ) : !caseId ? (
-          <p className="text-slate-500">💫 Select a case or start one from the Launch tab!</p>
+          <p className="text-slate-500">
+            {clean("💫 Select a case or start one from the Launch tab!")}
+          </p>
         ) : (
           <>
             {tab === "overview" && <Overview caseId={caseId} />}
