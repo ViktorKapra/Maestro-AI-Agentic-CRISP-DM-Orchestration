@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from maads.success_criterion import assessment_meets
+
 if TYPE_CHECKING:
     from maads.state import CrispDMState
 
@@ -15,7 +17,7 @@ def ml_outcome_deficits(state: "CrispDMState") -> list[str]:
     if not state.dep.submission_path:
         deficits.append("no submission_path")
     assessment = state.ev.assessment_of_dm_results or {}
-    if not assessment.get("meets"):
+    if not assessment_meets(assessment):
         deficits.append("business success criteria not met")
     return deficits
 

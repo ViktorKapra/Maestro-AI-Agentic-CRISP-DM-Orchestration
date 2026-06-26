@@ -123,6 +123,8 @@ def write_manifest_stub(paths: RunPaths, *, run_id: str, case_id: str) -> None:
                 "reports/postmortem.json",
                 "reports/case_report.json",
                 "reports/case_report.md",
+                "reports/execution_analysis.json",
+                "reports/execution_analysis.md",
                 "reports/improvement_bundle.json",
             ],
         },

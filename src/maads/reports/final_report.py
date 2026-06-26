@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from maads.state import CrispDMState
+from maads.success_criterion import assessment_meets
 
 
 def _fmt_metrics(metrics: dict[str, float]) -> str:
@@ -89,10 +90,11 @@ def render_final_report_md(
         "",
     ]
     if assessment:
-        meets = assessment.get("meets")
+        meets = assessment_meets(assessment)
+        score = assessment.get("achieved_score", assessment.get("cv_score", "n/a"))
         lines.extend([
             f"- **Success criterion met:** {meets}",
-            f"- **CV score:** {assessment.get('cv_score', 'n/a')}",
+            f"- **CV score:** {score}",
             f"- **Threshold:** {assessment.get('threshold', 'n/a')}",
             "",
         ])

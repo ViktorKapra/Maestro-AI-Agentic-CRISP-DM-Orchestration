@@ -166,15 +166,18 @@ from the domain understanding task."""
 
 DOMAIN_REFINE_GOALS_TASK = """CRISP-DM 1.3 Determine Data Mining Goals for "{dataset_name}".
 
-Given the data quality report and current business understanding in the state view,
-refine data_mining_goals and success criteria if warranted. If quality blockers
-contradict the current goals, recommend Loop A.
+Given the data quality report, feature_hints (including na_means_absent), and current
+business understanding in the state view, refine data_mining_goals and success criteria
+if warranted. High missingness on na_means_absent columns means feature absence, not
+data corruption — do not recommend Loop A for those alone. Recommend Loop A only when
+quality blockers contradict goals or require a fundamental rethink.
 
 Retrieved domain passages:
 {retrieved_passages}
 
 Output JSON with keys: data_mining_goal,
-success_criterion (metric, target_value, direction), loop_a_recommendation."""
+success_criterion (metric, target_value, direction), loop_a_recommendation.
+Optional: domain_data_quality_flags (list) when refining quality semantics."""
 
 
 def format_domain_situation_task(state: CrispDMState) -> tuple[str, str]:

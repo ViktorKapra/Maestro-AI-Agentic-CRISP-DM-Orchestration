@@ -16,8 +16,6 @@ from maads.state import CrispDMState, Phase
 def offline(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MAADS_TRACE", "0")
     monkeypatch.setenv("MAADS_PROGRESS", "0")
-    monkeypatch.setattr("maads.codegen.run_text_task", lambda *a, **k: "")
-
 
 @pytest.fixture
 def state() -> CrispDMState:

@@ -241,7 +241,7 @@ class DeveloperAgent:
         if s == "6.1":
             try:
                 return build_submission(self.pyexec, state, self.artifact_dir)
-            except RuntimeError as exc:
+            except (RuntimeError, CrewKickoffError) as exc:
                 return StateDelta(notes=f"Developer 6.1 submission failed: {exc}", failed=True)
         if s == "6.4":
             return experience_review(state)

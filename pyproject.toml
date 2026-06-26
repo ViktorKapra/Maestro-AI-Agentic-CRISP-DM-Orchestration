@@ -50,7 +50,7 @@ maads = ["config/*.yaml", "prompts/identities/backstories/*.md", "crews/**/confi
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.coverage.run]
 source = ["maads"]

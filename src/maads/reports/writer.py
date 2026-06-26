@@ -14,6 +14,10 @@ from maads.observability.llm_communications import (
 from maads.observability.schema import TraceRun
 from maads.outcome import ml_run_succeeded, workflow_complete
 from maads.reports.case_report import build_case_report, render_case_report_md
+from maads.reports.execution_analysis import (
+    build_execution_analysis,
+    render_execution_analysis_md,
+)
 from maads.reports.improvement_bundle import build_improvement_bundle
 from maads.reports.postmortem import build_postmortem
 from maads.state import CrispDMState
@@ -48,6 +52,16 @@ def write_run_reports(
     )
     (paths.reports / "case_report.md").write_text(
         render_case_report_md(case_report), encoding="utf-8",
+    )
+
+    analysis = build_execution_analysis(
+        state, paths, trace=trace, comm_summary=comm_summary,
+    )
+    (paths.reports / "execution_analysis.json").write_text(
+        json.dumps(analysis, indent=2, default=str), encoding="utf-8",
+    )
+    (paths.reports / "execution_analysis.md").write_text(
+        render_execution_analysis_md(analysis), encoding="utf-8",
     )
 
     bundle = build_improvement_bundle(

@@ -30,7 +30,6 @@ def fast_run(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MAADS_PROGRESS", "0")
     monkeypatch.setenv("CREWAI_DISABLE_TELEMETRY", "true")
     monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
-    monkeypatch.setattr("maads.codegen.run_text_task", lambda *a, **k: "")
 
 
 def _artifact_dir(tmp_path: Path) -> Path:
@@ -231,14 +230,13 @@ def test_loop_blocked_when_cap_reached(mock_llm, titanic_state: CrispDMState, tm
 
 
 @patch("maads.agents.run_json_task")
-def test_suggested_action_loop_a_on_quality_blockers(mock_llm, titanic_state: CrispDMState):
+def test_suggested_action_no_auto_loop_a_on_quality_blockers(mock_llm, titanic_state: CrispDMState):
+    """Loop A at 3.1 is semantic (PM agent); no mechanical suggested_action."""
     mock_llm.side_effect = fake_llm_response
     titanic_state.substep = "3.1"
     titanic_state.du.data_quality_report = {"blockers": ["Cabin >70% missing"]}
     suggested = titanic_state._suggested_pm_action()
-    assert suggested is not None
-    assert suggested["loop_label"] == "A"
-    assert suggested["target_substep"] == "1.3"
+    assert suggested is None
 
 
 @patch("maads.agents.run_json_task")

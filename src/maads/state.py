@@ -25,6 +25,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from maads.config import CaseConfig
+from maads.success_criterion import assessment_meets, criterion_direction, score_meets_threshold
 
 
 class Phase(IntEnum):
@@ -366,16 +367,6 @@ class CrispDMState(BaseModel):
     def _suggested_pm_action(self) -> dict[str, Any] | None:
         """Deterministic loop hint for the PM at decision substeps (advisory)."""
         sub = self.substep
-        if sub == "3.1":
-            blockers = _quality_blockers(self.du.data_quality_report)
-            if blockers:
-                return {
-                    "action": "loop_back",
-                    "loop_label": "A",
-                    "loop_to_phase": 1,
-                    "target_substep": "1.3",
-                    "reason": f"quality blockers present: {blockers[:3]}",
-                }
         if sub == "5.1":
             if self.validator_findings:
                 return {
@@ -395,7 +386,7 @@ class CrispDMState(BaseModel):
                 }
         if sub == "5.2":
             assessment = self.ev.assessment_of_dm_results or {}
-            if assessment and not assessment.get("meets"):
+            if assessment and not assessment_meets(assessment):
                 loop_a_count = sum(1 for le in self.loop_history if le.label == "A")
                 if loop_a_count >= 2:
                     return {
@@ -433,6 +424,7 @@ class CrispDMState(BaseModel):
             base["loop_history"] = [le.model_dump() for le in self.loop_history]
             base["recent_log"] = _trim_log(self.log, n=8)
             base["latest_quality_blockers"] = _quality_blockers(self.du.data_quality_report)
+            base["quality_gate"] = _quality_gate_view(self)
             base["latest_model_assessment"] = _latest_model_assessment(self.md)
             base["outputs_status"] = _pm_outputs_status(self)
             base["validator_findings"] = list(self.validator_findings)
@@ -444,12 +436,15 @@ class CrispDMState(BaseModel):
                     base["business_goal_met"] = None
                 else:
                     cv = self.md.chosen_model.cv_score if self.md.chosen_model else None
-                    thr = self.config.success_criterion.threshold
+                    sc = self.config.success_criterion
+                    dir_ = criterion_direction(sc.metric, sc.direction)
                     base["business_goal_met"] = (
-                        bool(cv is not None and cv >= thr) if cv is not None else None
+                        score_meets_threshold(cv, sc.threshold, direction=dir_)
+                        if cv is not None
+                        else None
                     )
             else:
-                base["business_goal_met"] = bool(assessment.get("meets"))
+                base["business_goal_met"] = assessment_meets(assessment)
         elif agent_name == "domain":
             base["bu"] = self.bu.model_dump(exclude_none=True)
             base["du_so_far"] = self.du.model_dump(exclude_none=True)
@@ -459,6 +454,8 @@ class CrispDMState(BaseModel):
             base["data_mining_goals"] = self.bu.data_mining_goals
             base["du_so_far"] = self.du.model_dump(exclude_none=True)
             base["dp_so_far"] = self.dp.model_dump(exclude_none=True)
+            if self.substep.startswith("2."):
+                base["feature_hints"] = self.config.feature_hints
         elif agent_name == "data_scientist":
             base["data_mining_goals"] = self.bu.data_mining_goals
             base["dataset"] = self.dp.dataset
@@ -554,6 +551,25 @@ def _quality_blockers(report: dict | None) -> list[str]:
     if not report:
         return []
     return list(report.get("blockers", []))
+
+
+def _domain_artifacts(bu: BusinessUnderstanding) -> dict[str, Any]:
+    inv = bu.inventory_of_resources or {}
+    artifacts = inv.get("domain_artifacts") or {}
+    return artifacts if isinstance(artifacts, dict) else {}
+
+
+def _quality_gate_view(state: "CrispDMState") -> dict[str, Any]:
+    """Context for PM semantic Loop A at 3.1."""
+    fh = state.config.feature_hints or {}
+    artifacts = _domain_artifacts(state.bu)
+    return {
+        "data_quality_report": state.du.data_quality_report,
+        "na_means_absent": list(fh.get("na_means_absent") or []),
+        "domain_data_quality_flags": artifacts.get("domain_data_quality_flags") or [],
+        "loop_a_recommendation": artifacts.get("loop_a_recommendation"),
+        "data_mining_goals": state.bu.data_mining_goals,
+    }
 
 
 def _latest_model_assessment(md: Modeling) -> dict | None:

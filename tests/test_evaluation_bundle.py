@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from maads.baselines import _ASSESS_SRC
+from tests.fixtures.assess_src import ASSESS_SRC
 from maads.capabilities.shared import run_snippet
 from maads.config import load_case_config
 from maads.paths import resolve_path
@@ -38,7 +38,7 @@ def test_assess_baseline_emits_evaluation_bundle(tiny_train_parquet: Path, tmp_p
     class_labels = '{"0": "Not survived", "1": "Survived"}'
     payload = run_snippet(
         pyexec,
-        _ASSESS_SRC,
+        ASSESS_SRC,
         __TRAIN__=str(tiny_train_parquet),
         __TARGET__="Survived",
         __ID__="PassengerId",

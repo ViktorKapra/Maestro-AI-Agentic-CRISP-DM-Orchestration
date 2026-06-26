@@ -389,6 +389,11 @@ data product.
 
 QUALITY SEVERITY
 
+For 2.4 Verify Data Quality: parse `na_means_absent` from DATASET_INSPECT_JSON
+(or feature_hints in state). Columns listed there encode feature absence via NA,
+not missing data — classify high missingness on those columns as tolerable
+(structural absence), not BLOCKING.
+
 Use:
 
 - INFO:

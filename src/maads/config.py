@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from maads.paths import resolve_path
@@ -19,6 +21,7 @@ class DataPaths(BaseModel):
 class SuccessCriterion(BaseModel):
     metric: str
     threshold: float
+    direction: Literal["minimize", "maximize"] | None = None
 
 
 class CaseConfig(BaseModel):

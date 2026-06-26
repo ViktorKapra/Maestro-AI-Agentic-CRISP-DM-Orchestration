@@ -4,14 +4,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from maads.baselines import (
-    _CLEAN_SRC, _COLLECT_SRC, _CONSTRUCT_SRC, _DESCRIBE_SRC, _FORMAT_SRC,
-    _INTEGRATE_SRC, _QUALITY_SRC,
-)
 from maads.codegen import run_authored_code
 from maads.deltas import StateDelta
 from maads.state import CrispDMState
-from maads.tools import PythonExec, inspect_dataset
+from maads.tools import PythonExec
 
 from maads.capabilities.shared import (
     abspath as _abspath,
@@ -19,10 +15,20 @@ from maads.capabilities.shared import (
     has_keys as _has_keys,
     prep_inputs as _prep_inputs,
     prep_workdir as _prep_workdir,
-    run_snippet as _run_snippet,
     describe_data_contract as _describe_data_contract,
     measure_prep_artifacts as _measure_prep_artifacts,
 )
+
+_QUALITY_24_INSTRUCTION = (
+    "CRISP-DM 2.4 Verify Data Quality: inspect the training data and classify "
+    "genuine quality BLOCKERS vs tolerable issues. Compute from the data. "
+    "Parse DATASET_INSPECT_JSON for na_means_absent: columns listed there use "
+    "NA to mean feature absence (not missing data) — high missingness on those "
+    "columns is NOT a blocker; record as tolerable with note 'structural absence "
+    "(no feature)'. Blockers are reserved for: missing target, constant columns, "
+    "duplicate-ID issues, undocumented high missingness, and schema contradictions."
+)
+
 
 def execution_evidence(
     pyexec: PythonExec,
@@ -33,8 +39,8 @@ def execution_evidence(
     """Have the Data Engineer author and run the code for its owned substep.
 
     Returns measured evidence in the shape `_apply_data_engineer_response`
-    expects. Each authored attempt self-debugs (codegen.run_authored_code) and
-    falls back to the fixed baseline snippet only when all attempts fail.
+    expects. Each authored attempt self-debugs via codegen.run_authored_code
+    (with Developer DEBUG on exhaustion); no baseline fallback.
     """
     train = _abspath(state.config.data.train_csv)
     test = _abspath(state.config.data.test_csv)
@@ -51,8 +57,6 @@ def execution_evidence(
             header_vars={"TRAIN_CSV": train, "TEST_CSV": test, **ds_ctx},
             contract=lambda p: _has_keys(p, "train_rows", "test_rows", "columns"),
             contract_hint="Required keys: train_rows (int), test_rows (int), columns (list).",
-            fallback=lambda: _run_snippet(pyexec, _COLLECT_SRC, __TRAIN__=train, __TEST__=test),
-            fallback_code=_COLLECT_SRC,
             artifact_dir=artifact_dir,
         )
         return {"initial_data_collection_report": res.payload}
@@ -70,8 +74,6 @@ def execution_evidence(
                 "missing (dict column name -> int count). "
                 "Do not emit parallel lists for dtypes or missing."
             ),
-            fallback=lambda: _run_snippet(pyexec, _DESCRIBE_SRC, __TRAIN__=train),
-            fallback_code=_DESCRIBE_SRC,
             artifact_dir=artifact_dir,
         )
         return {"data_description_report": res.payload}
@@ -79,14 +81,10 @@ def execution_evidence(
     if substep == "2.4":
         res = run_authored_code(
             pyexec=pyexec, agent_name="data_engineer", state=state,
-            instruction="CRISP-DM 2.4 Verify Data Quality: inspect the training data "
-                        "and list genuine quality BLOCKERS (e.g. >40% missing, constant "
-                        "columns, missing target) vs tolerable issues. Compute from the data.",
+            instruction=_QUALITY_24_INSTRUCTION,
             header_vars={"TRAIN_CSV": train, "TARGET": target, **ds_ctx},
             contract=lambda p: _has_keys(p, "blockers", "tolerable"),
             contract_hint="Required keys: blockers (list of strings), tolerable (list of strings).",
-            fallback=lambda: _run_snippet(pyexec, _QUALITY_SRC, __TRAIN__=train, __TARGET__=target),
-            fallback_code=_QUALITY_SRC,
             artifact_dir=artifact_dir,
         )
         return {"data_quality_report": res.payload}
@@ -111,11 +109,6 @@ def execution_evidence(
             ),
             contract_hint="Required keys: train_out, test_out (paths), missing_before, "
                           "missing_after (per-column int counts).",
-            fallback=lambda: _run_snippet(
-                pyexec, _CLEAN_SRC,
-                __TRAIN_IN__=train_in, __TEST_IN__=test_in, __OUTDIR__=prep_wd, __TARGET__=target,
-            ),
-            fallback_code=_CLEAN_SRC,
             artifact_dir=artifact_dir,
         )
         payload = res.payload
@@ -126,10 +119,8 @@ def execution_evidence(
                 "operations": payload.get("operations") or [],
                 "train_out": payload.get("train_out"),
                 "test_out": payload.get("test_out"),
-                "source": "executed at 3.2"
-                + (" [degraded: baseline fallback]" if res.degraded else ""),
+                "source": "executed at 3.2",
             },
-            "degraded": res.degraded,
         }
 
     if substep == "3.3":
@@ -145,11 +136,6 @@ def execution_evidence(
             },
             contract=lambda p: _has_keys(p, "train_out", "test_out", "derived"),
             contract_hint="Required keys: train_out, test_out (paths), derived (list of names).",
-            fallback=lambda: _run_snippet(
-                pyexec, _CONSTRUCT_SRC,
-                __TRAIN_IN__=train_in, __TEST_IN__=test_in, __OUTDIR__=prep_wd,
-            ),
-            fallback_code=_CONSTRUCT_SRC,
             artifact_dir=artifact_dir,
         )
         payload = res.payload
@@ -162,7 +148,6 @@ def execution_evidence(
                 ],
             },
             "generated_records": {"count": 0, "source": "executed at 3.3"},
-            "degraded": res.degraded,
         }
 
     if substep == "3.4":
@@ -176,11 +161,6 @@ def execution_evidence(
             contract=lambda p: _has_keys(p, "train_out", "test_out", "train_rows", "test_rows"),
             contract_hint="Required keys: train_out, test_out, train_rows, test_rows, "
                           "columns_train, columns_test.",
-            fallback=lambda: _run_snippet(
-                pyexec, _INTEGRATE_SRC,
-                __TRAIN_IN__=train_in, __TEST_IN__=test_in, __OUTDIR__=prep_wd,
-            ),
-            fallback_code=_INTEGRATE_SRC,
             artifact_dir=artifact_dir,
         )
         payload = res.payload
@@ -190,10 +170,8 @@ def execution_evidence(
                 "test_rows": payload.get("test_rows"),
                 "columns_train": payload.get("columns_train"),
                 "columns_test": payload.get("columns_test"),
-                "source": "executed at 3.4"
-                + (" [degraded: baseline fallback]" if res.degraded else ""),
+                "source": "executed at 3.4",
             },
-            "degraded": res.degraded,
         }
 
     if substep == "3.5":
@@ -215,12 +193,6 @@ def execution_evidence(
             ),
             contract_hint="Required keys: train (parquet path), test (parquet path), "
                           "n_train (int>0), n_test (int), derived (list), dropped (list).",
-            fallback=lambda: _run_snippet(
-                pyexec, _FORMAT_SRC,
-                __TRAIN_IN__=train_in, __TEST_IN__=test_in, __OUTDIR__=outdir,
-                __SOURCE_TRAIN__=source_train, __TARGET__=target, __ID__=idc,
-            ),
-            fallback_code=_FORMAT_SRC,
             artifact_dir=artifact_dir,
         )
         info = res.payload
@@ -239,11 +211,9 @@ def execution_evidence(
             "dataset_description": (
                 f"{info.get('n_train')} train / {info.get('n_test')} test rows (parquet); "
                 f"{n_derived} derived feature(s) reported by code"
-                + (" [degraded: baseline fallback]" if res.degraded else "")
             ),
             "derived": info.get("derived") or [],
             "dropped": info.get("dropped") or [],
-            "degraded": res.degraded,
             **measured,
         }
     return {}
@@ -273,7 +243,7 @@ def apply_response(
     substep: str,
     execution: dict[str, Any],
 ) -> StateDelta:
-    from maads.capabilities.shared import execution_or_llm, record_degraded
+    from maads.capabilities.shared import execution_or_llm
     from maads.output_contracts import validate_agent_output
 
     if not _execution_authoritative(execution, substep):
@@ -318,10 +288,6 @@ def apply_response(
         if cleaning:
             state.dp.data_cleaning_report = cleaning
             fields.append("dp.data_cleaning_report")
-        if execution.get("degraded"):
-            state.dp.reformatted_data = {"degraded": True, "reason": "DE 3.2 fell back to baseline"}
-            record_degraded(state, substep, "data_engineer", "3.2 baseline fallback")
-            fields.append("dp.reformatted_data")
     elif substep == "3.3":
         derived = execution_or_llm(execution, dp, "derived_attributes")
         if derived:
@@ -357,11 +323,6 @@ def apply_response(
         if merged:
             state.dp.merged_data = merged
             fields.append("dp.merged_data")
-        if execution.get("degraded"):
-            state.dp.reformatted_data = {"degraded": True, "reason": "DE prep fell back to baseline"}
-            record_degraded(state, substep, "data_engineer", "prep baseline fallback")
-            fields.append("dp.reformatted_data")
 
     summary = (data or {}).get("summary", "")
     return StateDelta(fields, notes=summary or f"DE completed {substep}")
-

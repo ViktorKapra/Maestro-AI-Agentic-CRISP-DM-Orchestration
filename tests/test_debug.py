@@ -290,7 +290,7 @@ def test_run_authored_code_uses_developer_before_fallback(
             return '```python\nimport json\nprint(json.dumps({"ok": True}))\n```'
         return '```python\nraise ValueError("fail")\n```'
 
-    monkeypatch.setattr("maads.codegen.run_text_task", fake_text)
+    monkeypatch.setattr("maads.crew.run_text_task", fake_text)
     monkeypatch.setattr("maads.crew.run_text_task", fake_text)
 
     res = run_authored_code(
@@ -340,13 +340,13 @@ def test_run_json_task_still_raises_when_debug_stuck(
         run_json_task("pm", "decide", state, artifact_dir=artifact_dir)
 
 
-def test_de_32_debug_before_fallback(
+def test_de_32_debug_without_baseline_fallback(
     monkeypatch: pytest.MonkeyPatch,
     pyexec: PythonExec,
     state: CrispDMState,
     artifact_dir: Path,
 ):
-    """DE 3.2 path routes to Developer DEBUG before baseline fallback."""
+    """DE 3.2 routes to Developer DEBUG when specialist code fails; no baseline fallback."""
     from maads.agents import DataEngineerAgent
 
     calls: list[str] = []
@@ -363,7 +363,7 @@ def test_de_32_debug_before_fallback(
             )
         return "```python\nraise RuntimeError('de fail')\n```"
 
-    monkeypatch.setattr("maads.codegen.run_text_task", fake_text)
+    monkeypatch.setattr("maads.crew.run_text_task", fake_text)
     monkeypatch.setattr("maads.crew.run_text_task", fake_text)
 
     def fake_json_task(_agent, _instruction, st, *_a, **_k):
@@ -374,10 +374,10 @@ def test_de_32_debug_before_fallback(
     monkeypatch.setattr("maads.agents.run_json_task", fake_json_task)
 
     agent = DataEngineerAgent(artifact_dir=artifact_dir)
-    state.phase = 2  # noqa: use int for phase if needed
     from maads.state import Phase
     state.phase = Phase.DATA_PREPARATION
     state.substep = "3.2"
     agent.act(state)
     assert "developer" in calls
-    assert state.degraded_flags or state.dp.data_cleaning_report
+    assert state.dp.data_cleaning_report
+    assert not any("baseline fallback" in f for f in state.degraded_flags)

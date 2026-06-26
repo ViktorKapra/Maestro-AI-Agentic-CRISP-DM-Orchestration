@@ -51,6 +51,9 @@ def record_degraded(state: CrispDMState, substep: str, agent: str, reason: str) 
 
 def de_dataset_context(state: CrispDMState, train: str, test: str) -> dict[str, Any]:
     summary = inspect_dataset(train, test, target_column=state.config.target_column)
+    fh = state.config.feature_hints or {}
+    if fh.get("na_means_absent"):
+        summary["na_means_absent"] = list(fh["na_means_absent"])
     return {"DATASET_INSPECT_JSON": json.dumps(summary, default=str)}
 
 
