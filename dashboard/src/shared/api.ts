@@ -1,4 +1,5 @@
 import type {
+  CaseConfig,
   CaseSummary,
   CommunicationRecord,
   CommunicationsSummary,
@@ -74,4 +75,21 @@ export function fetchState(caseId: string): Promise<CrispDMStatePayload> {
 
 export function fetchRag(caseId: string): Promise<RagView> {
   return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/rag`);
+}
+
+export function fetchConfigs(): Promise<CaseConfig[]> {
+  return fetchJson(`${API}/configs`);
+}
+
+export async function postStartRun(caseId: string): Promise<{ status: string; case_id: string; pid: number }> {
+  const res = await fetch(`${API}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ case_id: caseId }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${res.status} ${text}`);
+  }
+  return res.json();
 }

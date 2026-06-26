@@ -1,11 +1,14 @@
 """FastAPI routes for the trace monitoring dashboard."""
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 
 from maads.dashboard import aggregators, store
 from maads.observability.llm_communications import LLMCommunicationRecord, record_for_export
@@ -327,6 +330,54 @@ def get_rag(case_id: str) -> dict[str, Any]:
         if config_path.is_file():
             state = CrispDMState.from_config(load_case_config(config_path))
     return build_rag_view(state, case_id=case_id)
+
+
+@router.get("/configs")
+def list_configs() -> list[dict[str, Any]]:
+    """Return available case configs from the configs/ directory."""
+    from maads.paths import repo_root
+    import yaml as _yaml
+
+    configs_dir = repo_root() / "configs"
+    result = []
+    for yaml_path in sorted(configs_dir.glob("*.yaml")):
+        try:
+            raw = _yaml.safe_load(yaml_path.read_text())
+            result.append({
+                "case_id": raw.get("case_id", yaml_path.stem),
+                "problem_type": raw.get("problem_type"),
+                "evaluation_metric": raw.get("evaluation_metric"),
+                "problem_statement": (raw.get("problem_statement") or "").strip(),
+                "success_threshold": (raw.get("success_criterion") or {}).get("threshold"),
+            })
+        except Exception:
+            result.append({"case_id": yaml_path.stem, "problem_type": None, "evaluation_metric": None, "problem_statement": None, "success_threshold": None})
+    return result
+
+
+class RunRequest(BaseModel):
+    case_id: str
+
+
+@router.post("/run")
+def start_run(req: RunRequest) -> dict[str, Any]:
+    """Launch a pipeline run for the given case in the background."""
+    from maads.paths import repo_root
+
+    root = repo_root()
+    configs_dir = root / "configs"
+    config_path = configs_dir / f"{req.case_id}.yaml"
+    if not config_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Config not found: {req.case_id}")
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "maads", "run", "--case", req.case_id],
+        cwd=str(root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return {"status": "started", "case_id": req.case_id, "pid": proc.pid}
 
 
 def _comm_dict(record: LLMCommunicationRecord) -> dict[str, Any]:
