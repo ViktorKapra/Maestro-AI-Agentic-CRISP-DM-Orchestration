@@ -35,7 +35,7 @@ def _patch_llm(monkeypatch, replies):
             pass
         return last["v"]
 
-    monkeypatch.setattr("maads.codegen.run_text_task", fake)
+    monkeypatch.setattr("maads.crew.run_text_task", fake)
 
 
 def test_extract_code_handles_fences_and_raw():

@@ -14,8 +14,15 @@ from maads.observability.llm_communications import (
 from maads.observability.schema import TraceRun
 from maads.outcome import ml_run_succeeded, workflow_complete
 from maads.reports.case_report import build_case_report, render_case_report_md
+from maads.reports.execution_analysis import (
+    build_execution_analysis,
+    render_execution_analysis_md,
+)
+from maads.reports.final_report import build_story_spec_from_bundle, write_final_report
 from maads.reports.improvement_bundle import build_improvement_bundle
 from maads.reports.postmortem import build_postmortem
+from maads.reports.handoff import write_handoff_bundle
+from maads.reports.workbook import write_case_workbook
 from maads.state import CrispDMState
 
 
@@ -47,8 +54,42 @@ def write_run_reports(
         json.dumps(case_report, indent=2, default=str), encoding="utf-8",
     )
     (paths.reports / "case_report.md").write_text(
-        render_case_report_md(case_report), encoding="utf-8",
+        render_case_report_md(
+            case_report,
+            md_dir=paths.reports,
+            run_dir=paths.run_dir,
+        ),
+        encoding="utf-8",
     )
+
+    analysis = build_execution_analysis(
+        state, paths, trace=trace, comm_summary=comm_summary,
+    )
+    (paths.reports / "execution_analysis.json").write_text(
+        json.dumps(analysis, indent=2, default=str), encoding="utf-8",
+    )
+    (paths.reports / "execution_analysis.md").write_text(
+        render_execution_analysis_md(
+            analysis,
+            md_dir=paths.reports,
+            run_dir=paths.run_dir,
+        ),
+        encoding="utf-8",
+    )
+
+    write_case_workbook(state, paths, analysis=analysis)
+
+    if state.dep.story_spec_path and Path(state.dep.story_spec_path).is_file():
+        story_spec = json.loads(Path(state.dep.story_spec_path).read_text(encoding="utf-8"))
+    elif state.md.chosen_model:
+        story_spec = build_story_spec_from_bundle(state)
+    else:
+        story_spec = None
+    if story_spec is not None:
+        report_path = write_final_report(state, story_spec, paths.run_dir)
+        state.dep.final_report_path = str(report_path)
+
+    write_handoff_bundle(state, paths, analysis=analysis)
 
     bundle = build_improvement_bundle(
         state, paths, communications or [], case_root=case_root,

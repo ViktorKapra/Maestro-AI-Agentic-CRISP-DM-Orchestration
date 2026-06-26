@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from maads.text_normalize import normalize_inclusion_rationale
+
 if TYPE_CHECKING:
     from maads.state import CrispDMState
 
@@ -65,7 +67,9 @@ def validate_phase_3_artifacts(state: "CrispDMState") -> list[str]:
     if not feature_cols:
         errors.append("prepared train parquet has no feature columns")
 
-    rationale = state.dp.rationale_for_inclusion_exclusion or {}
+    rationale = normalize_inclusion_rationale(
+        state.dp.rationale_for_inclusion_exclusion,
+    )
     included = rationale.get("included_columns")
     if isinstance(included, list):
         expected = _predictor_columns(included, target, id_col)

@@ -71,8 +71,8 @@ budget; a back-edge *not* fired when the data demands it produces a silently bad
 
 | Loop | Trigger (read it from the state view) | Action |
 |---|---|---|
-| **A — 2 → 1** | Data Quality Report lists blockers (`data_quality_report.blockers` is non-empty), **or** the Domain Expert's hypotheses are contradicted by the actual schema | Return to **1.3** (Data Mining Goals); refine objectives and re-enter Phase 2 |
-| **B — 4 → 3** | Any of: the latest model `cv_score` is below the success threshold; **`validator_findings` is non-empty** (the prepared data failed a state-artifact check, e.g. a claimed derived feature is missing or the target has NaNs); or a model run degraded to the baseline fallback | Return to the affected substep of **Phase 3**; capped at three iterations |
+| **A — 2 → 1** | **Actionable** quality issues remain after considering `quality_gate` / `na_means_absent`, `domain_data_quality_flags`, and `loop_a_recommendation` — e.g. missing target, constant columns, undocumented corruption, schema contradictions, or Domain Expert sets `loop_a_recommendation.should_trigger` to true. **Do not** loop when reported blockers only concern structural absence already documented in config/domain artifacts and goals already require absence encoding | Return to **1.3** (Data Mining Goals); refine objectives and re-enter Phase 2 |
+| **B — 4 → 3** | Any of: the latest model `cv_score` is below the success threshold; **`validator_findings` is non-empty** (the prepared data failed a state-artifact check, e.g. a claimed derived feature is missing or the target has NaNs); or **`degraded_flags` is non-empty** | Return to the affected substep of **Phase 3**; capped at three iterations |
 | **C — 5 → 1** | Evaluate Results says the **Business Success Criteria are not met** (`assessment_of_dm_results` fails the success threshold) | Return to **1.3**; halt if Loop A has already fired twice |
 | **D — 6 → 1** | After 6.4 Review Project; the Experience Documentation feeds the next run | Optional outer cycle; supports cross-dataset learning |
 
@@ -122,9 +122,10 @@ field, as structured prose that is recorded into state), rather than dispatching
 ## What the state view contains
 
 Every user message gives you only the slice you need (never the whole state): the current
-`phase` and `substep`, the recent (trimmed) log, the latest `data_quality_report` blockers, the
-latest model assessment summary, and the `loop_history` so far. Reason strictly from what is
-present. If a field you would expect is absent, that absence is itself information — usually it
+`phase` and `substep`, the recent (trimmed) log, `quality_gate` (full data quality report,
+`na_means_absent`, domain quality flags, `loop_a_recommendation`, data mining goals),
+`latest_quality_blockers` (raw report list for audit), the latest model assessment summary,
+and the `loop_history` so far. Reason strictly from what is present. If a field you would expect is absent, that absence is itself information — usually it
 means the owning substep has not run yet, so the right move is to advance to it.
 
 ## Your output ·  a single directive object

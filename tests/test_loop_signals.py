@@ -21,7 +21,6 @@ def offline(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MAADS_TRACE", "0")
     monkeypatch.setenv("MAADS_PROGRESS", "0")
     monkeypatch.setattr("maads.agents.run_json_task", lambda *a, **k: {})
-    monkeypatch.setattr("maads.codegen.run_text_task", lambda *a, **k: "")
 
 
 @pytest.fixture
@@ -30,15 +29,30 @@ def state() -> CrispDMState:
     return CrispDMState.from_config(cfg)
 
 
-def test_real_quality_blockers_reach_pm_view(state: CrispDMState, tmp_path: Path):
+def test_real_quality_blockers_reach_pm_view(state: CrispDMState, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    quality_code = '''```python
+import pandas as pd, json
+df = pd.read_csv(TRAIN_CSV)
+blockers = []
+tolerable = []
+if df[TARGET].isna().any():
+    blockers.append("target missing")
+for c in df.columns:
+    if df[c].isna().mean() > 0.4:
+        blockers.append(f"{c}: high missing")
+print(json.dumps({"blockers": blockers, "tolerable": tolerable}))
+```'''
+    monkeypatch.setattr("maads.crew.run_text_task", lambda *a, **k: quality_code)
     state.substep = "2.4"
     de = DataEngineerAgent(artifact_dir=tmp_path)
-    de.act(state)
+    delta = de.act(state)
+    assert not delta.failed, delta.notes
     assert state.du.data_quality_report
     blockers = state.du.data_quality_report.get("blockers", [])
     assert blockers
     pm_view = state.view_for("pm")
     assert pm_view["latest_quality_blockers"]
+    assert "quality_gate" in pm_view
 
 
 def test_validator_findings_populate_and_reach_pm(state: CrispDMState, tmp_path: Path):
@@ -141,8 +155,55 @@ def test_ds_5_1_sets_assessment_from_chosen_model(tmp_path: Path, state: CrispDM
     assert assessment.get("cv_score") == thr + 0.05
 
 
-def test_inspect_dataset_reports_column_diff(state: CrispDMState, tmp_path: Path):
+def test_ds_5_1_rmse_log_meets_on_minimize(tmp_path: Path):
+    cfg = load_case_config(resolve_path("configs/house_prices.yaml"))
+    state = CrispDMState.from_config(cfg)
+    thr = cfg.success_criterion.threshold
+    state.phase = Phase.EVALUATION
+    state.substep = "5.1"
+    state.md.chosen_model = ModelRun(
+        technique="gradient_boosting",
+        cv_score=thr - 0.02,
+        description="strong model",
+    )
+    ds = DataScientistAgent(artifact_dir=tmp_path)
+    payload = minimal_agent_output(
+        "data_scientist",
+        "5.1",
+        summary="DS 5.1",
+        state_updates={
+            "ev": {
+                "assessment_of_dm_results": {
+                    "metric": "rmse_log",
+                    "achieved_score": thr - 0.02,
+                    "success_criterion_met": True,
+                    "threshold": thr,
+                },
+            },
+        },
+    )
+    with patch.object(ds._crew, "kickoff_substep", return_value=payload):
+        ds.act(state)
+    assessment = state.ev.assessment_of_dm_results or {}
+    assert assessment.get("meets") is True
+    assert assessment.get("success_criterion_met") is True
+    assert assessment.get("cv_score") == thr - 0.02
+
+
+def test_inspect_dataset_reports_column_diff(state: CrispDMState, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    describe_code = '''```python
+import pandas as pd, json
+df = pd.read_csv(TRAIN_CSV)
+print(json.dumps({
+    "n_rows": int(len(df)), "n_cols": int(df.shape[1]),
+    "columns": list(df.columns),
+    "dtypes": {c: str(t) for c, t in df.dtypes.items()},
+    "missing": {c: int(df[c].isna().sum()) for c in df.columns},
+}))
+```'''
+    monkeypatch.setattr("maads.crew.run_text_task", lambda *a, **k: describe_code)
     de = DataEngineerAgent(artifact_dir=tmp_path)
     state.substep = "2.2"
-    de.act(state)
+    delta = de.act(state)
+    assert not delta.failed, delta.notes
     assert state.du.data_description_report

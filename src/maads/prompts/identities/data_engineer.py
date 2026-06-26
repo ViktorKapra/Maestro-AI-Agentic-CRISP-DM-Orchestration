@@ -8,8 +8,6 @@ from typing import Any
 from maads.output_contracts import schema_hint_for_agent
 from maads.state import CrispDMState, SUBSTEP_NAMES
 
-DATA_ENGINEER_OUTPUT_SCHEMA_HINT = schema_hint_for_agent("data_engineer")
-
 _SUBSTEP_ASSIGNMENTS: dict[str, dict[str, Any]] = {
     "2.1": {
         "objective": "Collect initial data and produce the Initial Data Collection Report",
@@ -33,8 +31,12 @@ _SUBSTEP_ASSIGNMENTS: dict[str, dict[str, Any]] = {
         "requested_outputs": ["du.data_quality_report"],
         "completion_criteria": [
             "Blockers and tolerable issues classified with evidence",
+            "na_means_absent columns treated as structural absence, not blockers",
         ],
-        "constraints": ["Recommend Loop A only with blocking contradictions"],
+        "constraints": [
+            "Parse na_means_absent from DATASET_INSPECT_JSON; high NA on those columns is tolerable",
+            "Reserve blockers for missing target, constants, undocumented corruption",
+        ],
     },
     "3.1": {
         "objective": "Select data and document inclusion/exclusion rationale",
@@ -153,4 +155,4 @@ def format_data_engineer_task(
         "Return exactly one JSON object matching the output schema in your instructions.\n\n"
         f"Runtime input:\n{json.dumps(runtime_input, indent=2, default=str)}"
     )
-    return instruction, DATA_ENGINEER_OUTPUT_SCHEMA_HINT
+    return instruction, schema_hint_for_agent("data_engineer", substep=state.substep)

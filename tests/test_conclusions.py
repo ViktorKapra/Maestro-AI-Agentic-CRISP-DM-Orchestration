@@ -84,6 +84,20 @@ def test_data_preparation_phase_with_artifacts():
     assert summary["dataset_description"] == "891 train / 418 test rows (parquet)"
 
 
+def test_data_preparation_phase_accepts_list_rationale():
+    state = _state()
+    state.dp.rationale_for_inclusion_exclusion = [
+        "text",
+        "keyword",
+        {"field": "location", "decision": "include"},
+    ]
+
+    summary = build_conclusions_summary(state)
+    dp_phase = next(p for p in summary["phases"] if p["id"] == 3)
+    item = next(i for i in dp_phase["items"] if i["id"] == "3.1")
+    assert "3 included" in item["summary"]
+
+
 def test_modeling_and_evaluation_phases():
     state = _state()
     state.md.modeling_technique = "gradient_boosting"

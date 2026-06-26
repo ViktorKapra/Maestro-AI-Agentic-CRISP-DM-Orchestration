@@ -1,10 +1,13 @@
 """Deterministic final report renderer (markdown)."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from maads.reports.md_paths import md_file_link, relative_md_path
 from maads.state import CrispDMState
+from maads.success_criterion import assessment_meets
 
 
 def _fmt_metrics(metrics: dict[str, float]) -> str:
@@ -17,14 +20,25 @@ def _fmt_metrics(metrics: dict[str, float]) -> str:
     return "\n".join(lines)
 
 
-def _figure_section(figures: list[str]) -> str:
+def _figure_section(
+    figures: list[str],
+    *,
+    md_dir: Path | None = None,
+    run_dir: Path | None = None,
+    remap: Callable[[Path], Path] | None = None,
+) -> str:
     if not figures:
         return "_No figures available._\n"
     lines: list[str] = []
     for fig in figures:
         name = Path(fig).stem.replace("_", " ").title()
         lines.append(f"### {name}\n")
-        lines.append(f"![{name}]({fig})\n")
+        if md_dir is not None and run_dir is not None:
+            rel = relative_md_path(fig, md_dir=md_dir, run_dir=run_dir, remap=remap)
+            src = rel or fig
+        else:
+            src = fig
+        lines.append(f"![{name}]({src})\n")
     return "\n".join(lines)
 
 
@@ -75,8 +89,13 @@ def render_final_report_md(
     story_spec: dict[str, Any],
     *,
     artifact_dir: Path | None = None,
+    md_dir: Path | None = None,
+    run_dir: Path | None = None,
+    remap: Callable[[Path], Path] | None = None,
 ) -> str:
     """Render the full markdown report from state + story spec."""
+    md_dir = md_dir or artifact_dir
+    run_dir = run_dir or artifact_dir
     cm = state.md.chosen_model
     bundle = cm.evaluation_bundle if cm else None
     assessment = state.ev.assessment_of_dm_results or {}
@@ -89,10 +108,11 @@ def render_final_report_md(
         "",
     ]
     if assessment:
-        meets = assessment.get("meets")
+        meets = assessment_meets(assessment)
+        score = assessment.get("achieved_score", assessment.get("cv_score", "n/a"))
         lines.extend([
             f"- **Success criterion met:** {meets}",
-            f"- **CV score:** {assessment.get('cv_score', 'n/a')}",
+            f"- **CV score:** {score}",
             f"- **Threshold:** {assessment.get('threshold', 'n/a')}",
             "",
         ])
@@ -139,7 +159,16 @@ def render_final_report_md(
             str(bundle.confusion_matrix),
             "",
         ])
-    lines.extend(["## Visualizations", "", _figure_section(bundle.figures if bundle else [])])
+    lines.extend([
+        "## Visualizations",
+        "",
+        _figure_section(
+            bundle.figures if bundle else [],
+            md_dir=md_dir,
+            run_dir=run_dir,
+            remap=remap,
+        ),
+    ])
 
     interpretations = story_spec.get("interpretations") or []
     if interpretations:
@@ -174,8 +203,26 @@ def render_final_report_md(
 
     lines.extend(["## Appendix", ""])
     if state.dep.submission_path:
-        lines.append(f"- **Submission:** `{state.dep.submission_path}`")
-    if artifact_dir:
+        if md_dir is not None and run_dir is not None:
+            link = md_file_link(
+                state.dep.submission_path,
+                md_dir=md_dir,
+                run_dir=run_dir,
+                remap=remap,
+            )
+            lines.append(f"- **Submission:** {link or state.dep.submission_path}")
+        else:
+            lines.append(f"- **Submission:** `{state.dep.submission_path}`")
+    if artifact_dir and md_dir is not None and run_dir is not None:
+        link = md_file_link(
+            artifact_dir,
+            md_dir=md_dir,
+            run_dir=run_dir,
+            label="run directory",
+            remap=remap,
+        )
+        lines.append(f"- **Artifacts:** {link or '.'}")
+    elif artifact_dir:
         lines.append(f"- **Artifacts:** `{artifact_dir}`")
     if cm:
         lines.append(f"- **Assessment:** {cm.assessment or 'n/a'}")

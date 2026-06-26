@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from maads.artifact_paths import RunPaths
 from maads.observability.agent_labels import resolve_maads_agent_id
 from maads.observability.render.timeline import _TIMELINE_TYPES
 from maads.observability.schema import TraceEvent, TraceRun
@@ -462,6 +463,22 @@ def build_process_view(
     ):
         if path:
             deliverables.append(_deliverable(label, path, artifact_dir))
+    case_id = status.get("case_id") or ""
+    if artifact_dir is not None:
+        workbook = RunPaths(artifact_dir).reports / "case_workbook.ipynb"
+        deliverables.append(_deliverable(
+            "Case workbook",
+            str(workbook),
+            artifact_dir,
+            url=f"/api/cases/{case_id}/reports/case_workbook.ipynb" if case_id else None,
+        ))
+        handoff = RunPaths(artifact_dir).reports / "handoff_standard.zip"
+        deliverables.append(_deliverable(
+            "Standard handoff",
+            str(handoff),
+            artifact_dir,
+            url=f"/api/cases/{case_id}/reports/handoff_standard.zip" if case_id else None,
+        ))
 
     return {
         "updated_at": snapshot.get("updated_at") or status.get("updated_at"),
@@ -482,10 +499,19 @@ def build_process_view(
     }
 
 
-def _deliverable(label: str, path: str, artifact_dir: Path | None) -> dict[str, Any]:
+def _deliverable(
+    label: str,
+    path: str,
+    artifact_dir: Path | None,
+    *,
+    url: str | None = None,
+) -> dict[str, Any]:
     exists = Path(path).is_file() if path else False
     if not exists and artifact_dir and path:
         rel = Path(path)
         if not rel.is_absolute():
             exists = (artifact_dir / rel).is_file()
-    return {"label": label, "path": path, "exists": exists}
+    out: dict[str, Any] = {"label": label, "path": path, "exists": exists}
+    if url:
+        out["url"] = url
+    return out

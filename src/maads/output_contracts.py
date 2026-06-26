@@ -41,6 +41,40 @@ _ARRAY_FIELDS_SPECIALIST = (
 
 _ARRAY_FIELDS_DS_EXTRA = ("model_runs", "leakage_checks", "diagnostics")
 
+_DICT_LIST_FIELDS = frozenset({
+    "evidence",
+    "decisions",
+    "operations",
+    "quality_findings",
+    "validations",
+    "artifacts",
+    "assumptions",
+    "risks",
+    "blockers",
+    "handoffs",
+    "model_runs",
+    "leakage_checks",
+    "diagnostics",
+})
+
+_SCHEMA_SHAPE_NOTES = """
+Shape rules for specialist agent output:
+- assumptions, risks, blockers, handoffs, evidence, decisions: arrays of OBJECTS
+  (e.g. [{"statement": "..."}]), NOT bare strings.
+- Put plain-text modeling assumptions in state_updates.md.modeling_assumptions
+  when the substep requests them; use top-level assumptions for structured evidence.
+- List fields must be JSON arrays [], never empty strings.
+"""
+
+_SUBSTEP_SCHEMA_EXAMPLES: dict[tuple[str, str], str] = {
+    ("data_scientist", "4.1"): (
+        'Example for 4.1 (fragment): "state_updates": {"md": {"modeling_technique": '
+        '"logistic_regression", "modeling_assumptions": ["text is primary signal"]}}, '
+        '"assumptions": [{"statement": "TF-IDF baseline first", "basis": "feature_hints"}], '
+        '"risks": []'
+    ),
+}
+
 
 class CompletionEvidenceBase(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -308,6 +342,64 @@ def _format_validation_errors(exc: ValidationError) -> list[str]:
     ]
 
 
+def _coerce_dict_list_item(item: Any) -> dict[str, Any]:
+    """Wrap a bare string as a structured list item."""
+    if isinstance(item, dict):
+        return item
+    return {"statement": str(item)}
+
+
+def _coerce_dict_list(value: Any) -> list[dict[str, Any]]:
+    """Normalize a field that must be a list of objects."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        if not value.strip():
+            return []
+        return [{"statement": value.strip()}]
+    if not isinstance(value, list):
+        return [{"statement": str(value)}]
+    return [_coerce_dict_list_item(item) for item in value]
+
+
+def normalize_agent_output(agent_name: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Apply deterministic shape fixes in place before validation (idempotent)."""
+    if agent_name not in _SPECIALIST_AGENTS and agent_name != "developer":
+        return data
+
+    array_fields = list(_ARRAY_FIELDS_SPECIALIST)
+    if agent_name == "data_scientist":
+        array_fields.extend(_ARRAY_FIELDS_DS_EXTRA)
+
+    for name in array_fields:
+        value = data.get(name)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            data[name] = [] if not value.strip() else [value]
+            value = data[name]
+        if name in _DICT_LIST_FIELDS:
+            data[name] = _coerce_dict_list(value)
+        elif isinstance(value, list):
+            data[name] = value
+
+    su = data.get("state_updates")
+    if isinstance(su, str):
+        data["state_updates"] = {}
+    elif isinstance(su, dict):
+        for section in su.values():
+            if not isinstance(section, dict):
+                continue
+            for key, val in list(section.items()):
+                if key.endswith("_assumptions") and isinstance(val, list):
+                    section[key] = [
+                        str(item) if not isinstance(item, str) else item
+                        for item in val
+                    ]
+
+    return data
+
+
 def _check_array_fields(data: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
     errors: list[str] = []
     for name in fields:
@@ -398,10 +490,14 @@ def validate_agent_output(
     data: dict[str, Any] | None,
     *,
     substep: str | None = None,
+    normalize: bool = True,
 ) -> list[str]:
     """Return human-readable schema violations (empty list == valid)."""
     if not data or not isinstance(data, dict):
         return ["output is not a JSON object"]
+
+    if normalize:
+        normalize_agent_output(agent_name, data)
 
     errors = _check_debug_wrapper(data, agent_name)
     errors.extend(_check_state_updates(data))
@@ -638,11 +734,17 @@ def minimal_agent_output(
     return payload
 
 
-def schema_hint_for_agent(agent_name: str) -> str:
+def schema_hint_for_agent(agent_name: str, *, substep: str | None = None) -> str:
     """Compact schema hint string for task prompts."""
     import json
 
     model = _AGENT_MODELS.get(agent_name)
     if model is None:
         return "{}"
-    return json.dumps(model.model_json_schema(), indent=2)
+    parts = [json.dumps(model.model_json_schema(), indent=2)]
+    if agent_name in _SPECIALIST_AGENTS:
+        parts.append(_SCHEMA_SHAPE_NOTES.strip())
+        example = _SUBSTEP_SCHEMA_EXAMPLES.get((agent_name, substep or ""))
+        if example:
+            parts.append(example)
+    return "\n\n".join(parts)

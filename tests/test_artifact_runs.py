@@ -13,7 +13,7 @@ def test_prepare_run_dir_creates_isolated_run(tmp_path: Path) -> None:
 
     assert run_a == case / "runs" / "run-a"
     assert resolve_active_run_dir(case) == run_a
-    assert (case / "current").resolve() == run_a
+    assert (case / "current").read_text(encoding="utf-8").strip() == "run-a"
 
 
 def test_second_run_archives_first(tmp_path: Path) -> None:

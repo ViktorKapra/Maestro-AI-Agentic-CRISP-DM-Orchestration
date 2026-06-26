@@ -177,8 +177,10 @@ class DataEngineerAgent:
             data = self._crew.kickoff_substep(
                 s, state, self.artifact_dir, execution_evidence=execution or None,
             ) or {}
-        except (CrewKickoffError, RuntimeError):
-            data = {}
+        except CrewKickoffError as exc:
+            return StateDelta(notes=f"DE {s} LLM failed: {exc}", failed=True)
+        except RuntimeError as exc:
+            return StateDelta(notes=f"DE {s} runtime error: {exc}", failed=True)
         return _apply_data_engineer_response(data, state, s, execution)
 
 
@@ -219,8 +221,10 @@ class DataScientistAgent:
             data = self._crew.kickoff_substep(
                 s, state, self.artifact_dir, execution_evidence=execution or None,
             ) or {}
-        except (CrewKickoffError, RuntimeError):
-            data = {}
+        except CrewKickoffError as exc:
+            return StateDelta(notes=f"DS {s} LLM failed: {exc}", failed=True)
+        except RuntimeError as exc:
+            return StateDelta(notes=f"DS {s} runtime error: {exc}", failed=True)
         return _apply_data_scientist_response(data, state, s, execution)
 
 
@@ -237,7 +241,7 @@ class DeveloperAgent:
         if s == "6.1":
             try:
                 return build_submission(self.pyexec, state, self.artifact_dir)
-            except RuntimeError as exc:
+            except (RuntimeError, CrewKickoffError) as exc:
                 return StateDelta(notes=f"Developer 6.1 submission failed: {exc}", failed=True)
         if s == "6.4":
             return experience_review(state)
@@ -263,6 +267,8 @@ class StorytellerAgent:
             return render_final_report_step(state, self.artifact_dir)
         try:
             data = self._crew.kickoff_substep(s, state, self.artifact_dir) or {}
-        except (CrewKickoffError, RuntimeError):
-            data = {}
+        except CrewKickoffError as exc:
+            return StateDelta(notes=f"Storyteller {s} LLM failed: {exc}", failed=True)
+        except RuntimeError as exc:
+            return StateDelta(notes=f"Storyteller {s} runtime error: {exc}", failed=True)
         return _apply_storyteller_response(data, state, s, self.artifact_dir)

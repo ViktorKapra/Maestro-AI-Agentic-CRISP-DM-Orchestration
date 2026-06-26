@@ -1,16 +1,10 @@
-"""Run agent-authored Python with validation, self-debug retry, and fallback.
+"""Run agent-authored Python with validation, self-debug retry, and optional fallback.
 
 The owning agent's LLM proposes Python code; `PythonExec` runs it; the code must
 print a single JSON line matching a *contract*. On failure (crash, timeout, or a
 contract violation) we feed the captured stderr back to the agent for a revision
-(self-debug) up to a retry budget, then fall back to a fixed baseline snippet so
-a single bad generation never kills the whole run.
-
-This is the seam that turns the agents from narrators into doers: the parquet /
-model / submission they describe is the parquet / model / submission their own
-code actually produced. The fixed snippets in `agents.py` survive only as the
-last-resort fallback — and a fallback is itself a signal (degraded run) that the
-PM can treat as grounds for a Loop B.
+(self-debug) up to a retry budget. DE/DS/Developer execution substeps have no
+baseline fallback — a failed generation surfaces as a halt the PM can respond to.
 """
 from __future__ import annotations
 
@@ -20,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from maads.crew import CrewKickoffError, run_text_task
+import maads.crew as crew
 from maads.state import CrispDMState
 from maads.tools import ExecResult, PythonExec
 
@@ -138,8 +132,8 @@ def run_authored_code(
             instruction, header_vars, contract_hint, prior_code, prior_error
         )
         try:
-            raw = run_text_task(agent_name, prompt, state, expected_output="A Python code block.")
-        except (CrewKickoffError, RuntimeError) as exc:
+            raw = crew.run_text_task(agent_name, prompt, state, expected_output="A Python code block.")
+        except (crew.CrewKickoffError, RuntimeError) as exc:
             prior_error = f"LLM call failed: {exc}"
             state.append_log(agent_name, f"authored code attempt {attempt} -> LLM error", level="warn")
             continue
@@ -217,7 +211,7 @@ def run_authored_code(
             error=prior_error,
         )
 
-    raise CrewKickoffError(
+    raise crew.CrewKickoffError(
         f"{agent_name} authored code failed after {max_retries} attempts "
         f"and no fallback was provided: {prior_error}"
     )

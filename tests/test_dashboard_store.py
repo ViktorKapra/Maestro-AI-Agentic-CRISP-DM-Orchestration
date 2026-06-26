@@ -17,7 +17,7 @@ def test_resolve_active_run_prefers_current_with_status(tmp_path: Path):
     new.mkdir(parents=True)
     (old / "status.json").write_text("{}")
   # new run has no status yet
-    (case / "current").symlink_to(Path("runs") / "new-run")
+    (case / "current").write_text("new-run", encoding="utf-8")
     assert resolve_active_run_dir(case) == new
 
 
@@ -28,7 +28,7 @@ def test_list_cases_finds_run_under_runs_layout(tmp_path: Path):
     (run / "status.json").write_text(
         json.dumps({"case_id": "titanic", "phase": 1, "halted": False}),
     )
-    (case / "current").symlink_to(Path("runs") / "abc")
+    (case / "current").write_text("abc", encoding="utf-8")
     cases = list_cases(tmp_path)
     assert len(cases) == 1
     assert cases[0]["case_id"] == "titanic"

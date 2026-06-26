@@ -98,4 +98,18 @@ def apply_refine_goals(data: dict, state: CrispDMState) -> StateDelta:
     sc = data.get("success_criterion") or {}
     if sc:
         state.bu.data_mining_success_criteria = format_success_criterion(sc, state.config)
-    return StateDelta(["bu.data_mining_goals", "bu.data_mining_success_criteria"])
+    loop_rec = data.get("loop_a_recommendation")
+    domain_flags = data.get("domain_data_quality_flags")
+    if loop_rec is not None or domain_flags is not None:
+        inv = dict(state.bu.inventory_of_resources or {})
+        artifacts = dict(inv.get("domain_artifacts") or {})
+        if loop_rec is not None:
+            artifacts["loop_a_recommendation"] = loop_rec
+        if domain_flags is not None:
+            artifacts["domain_data_quality_flags"] = domain_flags
+        inv["domain_artifacts"] = artifacts
+        state.bu.inventory_of_resources = inv
+    fields = ["bu.data_mining_goals", "bu.data_mining_success_criteria"]
+    if loop_rec is not None or domain_flags is not None:
+        fields.append("bu.inventory_of_resources")
+    return StateDelta(fields)

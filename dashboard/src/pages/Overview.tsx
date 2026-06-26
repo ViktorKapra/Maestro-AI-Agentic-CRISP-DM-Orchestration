@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { HandoffDownloadLink } from "../components/HandoffDownloadLink";
 import { ProgressRail } from "../components/ProgressRail";
 import { TokenChart } from "../components/TokenChart";
 import { useCommunicationsSummary, useLiveSummary } from "../hooks/useCasePolling";
@@ -58,8 +59,8 @@ export function Overview({ caseId }: Props) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-      <section className="rounded-xl border border-surface-border bg-surface-raised p-5 space-y-4">
-        <h2 className="text-lg font-medium">Progress</h2>
+      <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 space-y-4 glow-card">
+        <h2 className="text-lg font-bold">📊 Progress</h2>
         {elapsedMs != null && (
           <p className="text-sm">
             <span className="text-slate-400">Elapsed:</span>{" "}
@@ -77,26 +78,26 @@ export function Overview({ caseId }: Props) {
         {live && (
           <div className="space-y-2 text-sm">
             <p>
-              <span className="text-slate-400">Phase:</span>{" "}
+              <span className="text-slate-400 font-semibold">🌷 Phase:</span>{" "}
               {live.phase} — {live.phase_name}
             </p>
             <p>
-              <span className="text-slate-400">Substep:</span>{" "}
+              <span className="text-slate-400 font-semibold">🧩 Substep:</span>{" "}
               {live.substep} — {live.substep_name}
             </p>
-            <p className="text-slate-300">{live.activity}</p>
+            <p className="text-slate-300">💭 {live.activity}</p>
             {live.halted && (
-              <p className="text-red-400">Halted: {live.halt_reason}</p>
+              <p className="text-status-halted font-semibold">😵 Halted: {live.halt_reason}</p>
             )}
             {live.workflow_complete != null && (
               <p>
-                <span className="text-slate-400">Workflow:</span>{" "}
+                <span className="text-slate-400 font-semibold">🎀 Workflow:</span>{" "}
                 {live.workflow_complete ? "complete" : "incomplete"}
               </p>
             )}
             {live.ml_success != null && (
               <p className={live.ml_success ? "text-green-400" : "text-amber-400"}>
-                ML outcome: {live.ml_success ? "success" : "failed"}
+                ML outcome: {live.ml_success ? "success ✨" : "failed 😵"}
                 {live.ml_deficits && live.ml_deficits.length > 0 && (
                   <span className="text-slate-400">
                     {" "}
@@ -105,22 +106,27 @@ export function Overview({ caseId }: Props) {
                 )}
               </p>
             )}
+            <HandoffDownloadLink
+              caseId={caseId}
+              show={Boolean(live.halted || live.workflow_complete)}
+              className="pt-2 border-t border-surface-border/60"
+            />
           </div>
         )}
       </section>
 
-      <section className="rounded-xl border border-surface-border bg-surface-raised p-5">
-        <h2 className="text-lg font-medium mb-4">Token spend</h2>
+      <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
+        <h2 className="text-lg font-bold mb-4">🪙 Token spend</h2>
         <TokenChart
           summary={summary}
           tokenSpend={live?.token_spend}
         />
       </section>
 
-      <section className="rounded-xl border border-surface-border bg-surface-raised p-5 lg:col-span-2">
-        <h2 className="text-lg font-medium mb-2">Activity</h2>
+      <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 lg:col-span-2 glow-card">
+        <h2 className="text-lg font-bold mb-2">💬 Activity</h2>
         <p className="text-sm text-slate-400">
-          {live?.activity ?? "Waiting for status…"}
+          {live?.activity ?? "Waiting for status… 🕰️"}
         </p>
         {live?.in_flight && (
           <p className="text-sm text-yellow-400/90 mt-2">
@@ -131,14 +137,14 @@ export function Overview({ caseId }: Props) {
         )}
         {live?.last_comm && (
           <p className="text-sm text-slate-500 mt-2">
-            Last LLM turn:{" "}
+            🦄 Last LLM turn:{" "}
             <span className="font-mono text-accent-muted">{live.last_comm.id}</span>{" "}
             ({live.last_comm.agent}, {live.last_comm.tokens ?? "?"} tokens)
           </p>
         )}
         {summary && summary.parse_failures > 0 && (
-          <p className="text-sm text-red-400 mt-2">
-            {summary.parse_failures} parse failure(s) detected
+          <p className="text-sm text-status-halted font-semibold mt-2">
+            😬 {summary.parse_failures} parse failure(s) detected
           </p>
         )}
         {isRunning && (

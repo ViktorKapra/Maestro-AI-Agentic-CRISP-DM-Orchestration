@@ -43,3 +43,4 @@ feature_hints:
 success_criterion:
   metric: rmse_log
   threshold: 0.15   # above this, the 5 -> 1 loop should fire
+  direction: minimize

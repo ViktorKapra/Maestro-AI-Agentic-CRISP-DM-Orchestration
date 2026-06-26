@@ -322,12 +322,8 @@ def _patch_crew() -> None:
     if agents_mod.run_json_task is orig_json:
         agents_mod.run_json_task = traced_run_json_task
 
-    # codegen.py binds run_text_task at import time; patch after crew so first import
-    # of codegen sees the traced function.
-    import maads.codegen as codegen_mod
-
-    if codegen_mod.run_text_task is orig_text:
-        codegen_mod.run_text_task = traced_run_text_task
+    # codegen.run_authored_code calls crew.run_text_task via the crew module,
+    # so patching crew_mod.run_text_task above covers codegen paths.
 
 
 def _patch_tools() -> None:

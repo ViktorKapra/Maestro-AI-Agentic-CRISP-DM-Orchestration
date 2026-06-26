@@ -1,6 +1,6 @@
 # Experience — titanic
 
 - Loops fired: none
-- Degraded steps: ['data_engineer@3.2: 3.2 baseline fallback', 'data_engineer@3.5: prep baseline fallback', 'data_scientist@4.3: 4.3 baseline fallback', 'data_scientist@4.4: 4.4 baseline fallback']
+- Degraded steps: none
 - Chosen model: gradient_boosting
-- CV: 0.8170359676103194
+- CV: 0.8192831586215554

@@ -121,7 +121,15 @@ export interface GraphPayload {
   edges: FlowEdge[];
 }
 
-export type TabId = "overview" | "process" | "state" | "communications" | "architecture" | "timeline" | "knowledge";
+export type TabId = "overview" | "process" | "state" | "communications" | "architecture" | "timeline" | "knowledge" | "framework" | "prompts" | "state_shape" | "loop_logic" | "failure_modes" | "launch";
+
+export interface CaseConfig {
+  case_id: string;
+  problem_type: string | null;
+  evaluation_metric: string | null;
+  problem_statement: string | null;
+  success_threshold: number | null;
+}
 
 export type SubstepStatus = "done" | "active" | "pending" | "skipped";
 export type PhaseStatus = "complete" | "active" | "pending";
@@ -248,6 +256,7 @@ export interface ProcessDeliverable {
   label: string;
   path: string;
   exists: boolean;
+  url?: string | null;
 }
 
 export interface ProcessView {

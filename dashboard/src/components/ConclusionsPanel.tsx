@@ -201,12 +201,26 @@ export function ConclusionsPanel({ conclusions, deliverables, config }: Props) {
         <Section title="Deployment">
           <ul className="space-y-1">
             {deliverables?.map((d) => (
-              <li key={d.path} className="font-mono text-xs flex items-center gap-2">
+              <li key={d.path} className="font-mono text-xs flex items-center gap-2 flex-wrap">
                 <span className={d.exists ? "text-emerald-400" : "text-slate-600"}>
                   {d.exists ? "●" : "○"}
                 </span>
                 <span className="text-slate-500">{d.label}:</span>
-                <span className="text-slate-400 truncate">{d.path}</span>
+                {d.exists && d.url ? (
+                  <a
+                    href={d.url}
+                    className="text-accent hover:underline truncate"
+                    download
+                  >
+                    {d.label === "Case workbook"
+                      ? "Open notebook"
+                      : d.label === "Standard handoff"
+                        ? "handoff_standard.zip"
+                        : d.path}
+                  </a>
+                ) : (
+                  <span className="text-slate-400 truncate">{d.path}</span>
+                )}
               </li>
             ))}
           </ul>

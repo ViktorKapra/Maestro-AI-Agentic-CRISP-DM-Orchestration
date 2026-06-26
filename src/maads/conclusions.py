@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from maads.text_normalize import normalize_inclusion_rationale
 from maads.outcome import ml_outcome_deficits, ml_run_succeeded, workflow_complete
+from maads.success_criterion import assessment_summary_phrase
 from maads.state import (
     SUBSTEP_NAMES,
     CrispDMState,
@@ -263,7 +265,7 @@ def _dp_phase(state: CrispDMState) -> list[dict[str, Any]]:
     dp = state.dp
     items: list[dict[str, Any]] = []
 
-    rationale = dp.rationale_for_inclusion_exclusion
+    rationale = normalize_inclusion_rationale(dp.rationale_for_inclusion_exclusion)
     if rationale:
         included = rationale.get("included") or rationale.get("features_included") or []
         excluded = rationale.get("excluded") or rationale.get("features_excluded") or []
@@ -413,11 +415,8 @@ def _ev_phase(state: CrispDMState) -> list[dict[str, Any]]:
 
     if ev.assessment_of_dm_results or ev.approved_models:
         assess = ev.assessment_of_dm_results or {}
-        meets = assess.get("meets")
         cv = assess.get("cv_score")
-        summary = "Results evaluated."
-        if cv is not None:
-            summary = f"CV {cv:.4f}" + (" meets threshold." if meets else " below threshold.")
+        summary = assessment_summary_phrase(assess, cv_score=cv)
         items.append(_item(
             "5.1",
             summary=summary,

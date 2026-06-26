@@ -19,7 +19,7 @@ from maads.debug import (
 from maads.paths import resolve_path
 from maads.state import CrispDMState
 from maads.tools import ExecResult, PythonExec
-from maads.output_contracts import _minimal_de_response
+from maads.output_contracts import _minimal_de_response, minimal_data_scientist_output
 
 
 @pytest.fixture(autouse=True)
@@ -53,6 +53,36 @@ def test_classify_exec_error_labels_schema_and_timeout():
     assert classify_exec_error(
         ExecResult(ok=False, stdout="", stderr="timed out", return_code=-1, timed_out=True),
     ) == "timeout"
+
+
+def test_debug_json_parse_normalizes_schema_without_developer_llm(
+    state: CrispDMState,
+    artifact_dir: Path,
+):
+    state.substep = "4.1"
+    invalid = minimal_data_scientist_output(
+        "4.1",
+        state_updates={
+            "md": {
+                "modeling_technique": "logistic_regression",
+                "modeling_assumptions": ["text baseline"],
+            },
+        },
+    )
+    invalid["assumptions"] = ["Plain string assumption"]
+    invalid["risks"] = ["Plain string risk"]
+    outcome = debug_json_parse(
+        state=state,
+        artifact_dir=artifact_dir,
+        requesting_agent="data_scientist",
+        raw_text=json.dumps(invalid),
+        failure_kind="json_schema",
+        invalid_payload=invalid,
+    )
+    assert outcome.status == "FIXED"
+    assert outcome.repair_kind == "deterministic_schema"
+    assert outcome.payload is not None
+    assert outcome.payload["assumptions"][0]["statement"] == "Plain string assumption"
 
 
 def test_debug_json_parse_repairs_trailing_comma(state: CrispDMState, artifact_dir: Path):
@@ -260,7 +290,7 @@ def test_run_authored_code_uses_developer_before_fallback(
             return '```python\nimport json\nprint(json.dumps({"ok": True}))\n```'
         return '```python\nraise ValueError("fail")\n```'
 
-    monkeypatch.setattr("maads.codegen.run_text_task", fake_text)
+    monkeypatch.setattr("maads.crew.run_text_task", fake_text)
     monkeypatch.setattr("maads.crew.run_text_task", fake_text)
 
     res = run_authored_code(
@@ -310,13 +340,13 @@ def test_run_json_task_still_raises_when_debug_stuck(
         run_json_task("pm", "decide", state, artifact_dir=artifact_dir)
 
 
-def test_de_32_debug_before_fallback(
+def test_de_32_debug_without_baseline_fallback(
     monkeypatch: pytest.MonkeyPatch,
     pyexec: PythonExec,
     state: CrispDMState,
     artifact_dir: Path,
 ):
-    """DE 3.2 path routes to Developer DEBUG before baseline fallback."""
+    """DE 3.2 routes to Developer DEBUG when specialist code fails; no baseline fallback."""
     from maads.agents import DataEngineerAgent
 
     calls: list[str] = []
@@ -333,7 +363,7 @@ def test_de_32_debug_before_fallback(
             )
         return "```python\nraise RuntimeError('de fail')\n```"
 
-    monkeypatch.setattr("maads.codegen.run_text_task", fake_text)
+    monkeypatch.setattr("maads.crew.run_text_task", fake_text)
     monkeypatch.setattr("maads.crew.run_text_task", fake_text)
 
     def fake_json_task(_agent, _instruction, st, *_a, **_k):
@@ -344,10 +374,10 @@ def test_de_32_debug_before_fallback(
     monkeypatch.setattr("maads.agents.run_json_task", fake_json_task)
 
     agent = DataEngineerAgent(artifact_dir=artifact_dir)
-    state.phase = 2  # noqa: use int for phase if needed
     from maads.state import Phase
     state.phase = Phase.DATA_PREPARATION
     state.substep = "3.2"
     agent.act(state)
     assert "developer" in calls
-    assert state.degraded_flags or state.dp.data_cleaning_report
+    assert state.dp.data_cleaning_report
+    assert not any("baseline fallback" in f for f in state.degraded_flags)

@@ -26,7 +26,6 @@ def fast_run(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MAADS_PROGRESS", "0")
     monkeypatch.setenv("CREWAI_DISABLE_TELEMETRY", "true")
     monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
-    monkeypatch.setattr("maads.codegen.run_text_task", lambda *a, **k: "")
 
 
 def test_flow_imports():

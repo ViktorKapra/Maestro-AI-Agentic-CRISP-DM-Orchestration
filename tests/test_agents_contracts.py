@@ -63,7 +63,7 @@ def test_describe_contract_violation_triggers_fallback(monkeypatch, pyexec, stat
             pass
         return last["v"]
 
-    monkeypatch.setattr("maads.codegen.run_text_task", fake)
+    monkeypatch.setattr("maads.crew.run_text_task", fake)
 
     good = {
         "n_rows": 1,

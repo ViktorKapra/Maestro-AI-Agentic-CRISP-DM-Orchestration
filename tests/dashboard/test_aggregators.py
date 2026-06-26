@@ -201,7 +201,28 @@ def test_build_process_view_substep_status():
     assert view["phases"][0]["status"] == "active"
 
 
-def test_build_process_view_loops():
+def test_build_process_view_includes_workbook_deliverable(tmp_path: Path):
+    from maads.dashboard.aggregators import build_process_view
+    from maads.observability.schema import TraceRun
+
+    run_dir = tmp_path / "runs" / "agg-run"
+    reports = run_dir / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "case_workbook.ipynb").write_text("{}", encoding="utf-8")
+
+    status = {"case_id": "titanic", "substep": "6.4", "phase": 6, "token_spend": {}}
+    snapshot = {
+        "outputs_status": {},
+        "conclusions": {},
+        "config": {},
+        "recent_log": [],
+        "loop_history": [],
+        "validator_findings": [],
+    }
+    view = build_process_view(status, TraceRun(run_id="r1"), snapshot, artifact_dir=run_dir)
+    wb = next(d for d in view["deliverables"] if d["label"] == "Case workbook")
+    assert wb["exists"] is True
+    assert wb["url"] == "/api/cases/titanic/reports/case_workbook.ipynb"
     run = TraceRun(
         run_id="r1",
         events=[

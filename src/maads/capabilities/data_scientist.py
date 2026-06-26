@@ -5,24 +5,42 @@ import json
 from pathlib import Path
 from typing import Any
 
-from maads.baselines import (
-    _ASSESS_SRC,
-    _EXPLORE_SRC,
-    _NLP_TRAIN_SRC,
-    _TRAIN_SRC,
-    is_nlp_case,
-    primary_text_column,
-)
+from pydantic import ValidationError
+
 from maads.codegen import run_authored_code
 from maads.deltas import StateDelta
 from maads.capabilities.shared import (
     abspath as _abspath,
     execution_or_llm,
     has_keys as _has_keys,
-    record_degraded,
-    run_snippet as _run_snippet,
 )
-from maads.state import CrispDMState, EvaluationBundle, ModelRun
+from maads.state import CrispDMState, EvaluationBundle, ModelRun, coerce_evaluation_bundle
+from maads.success_criterion import normalize_assessment
+
+
+def _evaluation_bundle_contract(
+    payload: dict[str, Any],
+    *,
+    problem_type: str,
+    class_labels: dict[str, str],
+) -> list[str]:
+    key_errors = _has_keys(payload, "evaluation_bundle")
+    if key_errors:
+        return key_errors
+    raw = payload.get("evaluation_bundle")
+    if not isinstance(raw, dict):
+        return ["evaluation_bundle must be an object"]
+    try:
+        EvaluationBundle.model_validate(
+            coerce_evaluation_bundle(
+                raw,
+                problem_type=problem_type,
+                class_labels=class_labels,
+            ),
+        )
+    except ValidationError as exc:
+        return [str(exc).split("\n")[0]]
+    return []
 
 
 def execution_evidence(
@@ -31,7 +49,7 @@ def execution_evidence(
     substep: str,
     artifact_dir: Path,
 ) -> dict[str, Any]:
-    """Author and run code for DS-owned execution substeps."""
+    """Author and run code for DS-owned execution substeps (no baseline fallback)."""
     train = _abspath(state.config.data.train_csv)
     target = state.config.target_column
 
@@ -45,8 +63,6 @@ def execution_evidence(
             contract=lambda p: _has_keys(p, "n_rows", "target"),
             contract_hint="Required keys: n_rows (int), target (str); add any findings "
                           "(e.g. target_distribution, correlations).",
-            fallback=lambda: _run_snippet(pyexec, _EXPLORE_SRC, __TRAIN__=train, __TARGET__=target),
-            fallback_code=_EXPLORE_SRC,
             artifact_dir=artifact_dir,
         )
         return {"data_exploration_report": res.payload}
@@ -59,19 +75,6 @@ def execution_evidence(
         metric = state.config.evaluation_metric
         problem_type = state.config.problem_type
         technique_hint = state.md.modeling_technique or "your choice"
-        if is_nlp_case(state.config.feature_hints):
-            text_col = primary_text_column(state.config.feature_hints) or "text"
-            train_fallback = lambda: _run_snippet(
-                pyexec, _NLP_TRAIN_SRC,
-                __TRAIN__=dataset_train, __TARGET__=target,
-                __TEXT_COL__=text_col, __METRIC__=metric,
-            )
-            train_code = _NLP_TRAIN_SRC
-        else:
-            train_fallback = lambda: _run_snippet(
-                pyexec, _TRAIN_SRC, __TRAIN__=dataset_train, __TARGET__=target, __ID__=idc,
-            )
-            train_code = _TRAIN_SRC
         res = run_authored_code(
             pyexec=pyexec, agent_name="data_scientist", state=state,
             instruction="CRISP-DM 4.3 Build Model: write and execute Python that reads "
@@ -93,8 +96,6 @@ def execution_evidence(
                     else ["cv_score and cv_std must be numeric"])
             ),
             contract_hint="Required keys: technique (str), cv_score (float), cv_std (float), n_features (int).",
-            fallback=train_fallback,
-            fallback_code=train_code,
             artifact_dir=artifact_dir,
         )
         p = res.payload
@@ -103,11 +104,9 @@ def execution_evidence(
                 "technique": p.get("technique") or "unspecified",
                 "cv_score": p.get("cv_score"),
                 "cv_std": p.get("cv_std"),
-                "description": f"{p.get('n_features', '?')} features, CV"
-                               + (" [degraded: baseline fallback]" if res.degraded else ""),
+                "description": f"{p.get('n_features', '?')} features, CV",
                 "parameter_settings": p.get("parameter_settings") or {},
             },
-            "degraded": res.degraded,
         }
 
     if substep == "4.4":
@@ -117,12 +116,11 @@ def execution_evidence(
         idc = state.config.id_column
         problem_type = state.config.problem_type
         figures_dir = str((artifact_dir / "figures").resolve())
-        class_labels = json.dumps(state.config.class_labels or {})
-        assess_fallback = lambda: _run_snippet(
-            pyexec, _ASSESS_SRC,
-            __TRAIN__=dataset_train, __TARGET__=target, __ID__=idc,
-            __PROBLEM_TYPE__=problem_type, __FIGURES_DIR__=figures_dir,
-            __CLASS_LABELS__=class_labels,
+        class_labels_map = state.config.class_labels or {}
+        bundle_contract = lambda p: _evaluation_bundle_contract(
+            p,
+            problem_type=problem_type,
+            class_labels=class_labels_map,
         )
         res = run_authored_code(
             pyexec=pyexec, agent_name="data_scientist", state=state,
@@ -131,26 +129,29 @@ def execution_evidence(
                         "out-of-fold predictions via stratified CV, computes problem-type-appropriate "
                         "metrics (for binary classification: accuracy, balanced accuracy, per-class "
                         "precision/recall/F1, confusion matrix), saves figures under FIGURES_DIR, "
-                        "and prints evaluation_bundle. Use CLASS_LABELS for human-readable names.",
+                        "and prints evaluation_bundle. Use CLASS_LABELS for human-readable names. "
+                        "evaluation_bundle must include problem_type, metrics (flat float map), "
+                        "confusion_matrix, class_labels, figures (list of paths), and optional cv.",
             header_vars={
                 "TRAIN_PARQUET": dataset_train,
                 "TARGET": target,
                 "ID_COL": idc,
                 "PROBLEM_TYPE": problem_type,
                 "FIGURES_DIR": figures_dir,
-                "CLASS_LABELS": class_labels,
+                "CLASS_LABELS": json.dumps(class_labels_map),
             },
-            contract=lambda p: _has_keys(p, "evaluation_bundle"),
-            contract_hint="Required key: evaluation_bundle (dict with metrics, confusion_matrix, figures).",
-            fallback=assess_fallback,
-            fallback_code=_ASSESS_SRC,
+            contract=bundle_contract,
+            contract_hint=(
+                "Required key: evaluation_bundle with problem_type, metrics (numbers only), "
+                "confusion_matrix, figures (list of path strings). "
+                "Do not nest per_class metrics or use a dict for figures."
+            ),
             artifact_dir=artifact_dir,
         )
         p = res.payload
         return {
             "evaluation_bundle": p.get("evaluation_bundle"),
             "assessment": p.get("assessment"),
-            "degraded": res.degraded,
         }
     return {}
 
@@ -175,7 +176,7 @@ def apply_response(
     substep: str,
     execution: dict[str, Any],
 ) -> StateDelta:
-    """Map data-scientist JSON (or execution fallback) into shared state."""
+    """Map data-scientist JSON (or execution evidence) into shared state."""
     from maads.output_contracts import validate_agent_output
 
     if not _execution_authoritative(execution, substep):
@@ -228,13 +229,6 @@ def apply_response(
         ))
         state.md.modeling_technique = technique
         fields.extend(["md.models", "md.modeling_technique"])
-        if execution.get("degraded"):
-            state.append_log(
-                "data_scientist",
-                "4.3 model training degraded to baseline fallback",
-                level="warn",
-            )
-            record_degraded(state, substep, "data_scientist", "4.3 baseline fallback")
     elif substep == "4.4":
         bundle_raw = execution.get("evaluation_bundle")
         if state.md.models:
@@ -251,26 +245,37 @@ def apply_response(
                 or "selected: best CV score"
             )
             if bundle_raw:
-                best.evaluation_bundle = EvaluationBundle.model_validate(bundle_raw)
+                try:
+                    best.evaluation_bundle = EvaluationBundle.model_validate(
+                        coerce_evaluation_bundle(
+                            bundle_raw,
+                            problem_type=state.config.problem_type,
+                            class_labels=state.config.class_labels or {},
+                        ),
+                    )
+                except ValidationError as exc:
+                    return StateDelta(
+                        notes=f"DS 4.4: invalid evaluation_bundle: {exc}",
+                        failed=True,
+                    )
             state.md.chosen_model = best
             fields.append("md.chosen_model")
         elif not bundle_raw:
             return StateDelta(notes="DS 4.4: no evaluation_bundle from execution", failed=True)
-        if execution.get("degraded"):
-            state.append_log(
-                "data_scientist",
-                "4.4 assessment degraded to baseline fallback",
-                level="warn",
-            )
-            record_degraded(state, substep, "data_scientist", "4.4 baseline fallback")
     elif substep == "5.1":
         cv = state.md.chosen_model.cv_score if state.md.chosen_model else None
-        thr = state.config.success_criterion.threshold
-        state.ev.assessment_of_dm_results = ev.get("assessment_of_dm_results") or {
+        sc = state.config.success_criterion
+        raw = ev.get("assessment_of_dm_results") or {
             "cv_score": cv,
-            "threshold": thr,
-            "meets": bool(cv is not None and cv >= thr),
+            "threshold": sc.threshold,
         }
+        state.ev.assessment_of_dm_results = normalize_assessment(
+            raw,
+            metric=sc.metric,
+            threshold=sc.threshold,
+            direction=sc.direction,
+            cv_score=cv,
+        )
         fields.append("ev.assessment_of_dm_results")
         if state.md.chosen_model:
             state.ev.approved_models = [state.md.chosen_model]
