@@ -248,6 +248,7 @@ export interface ProcessDeliverable {
   label: string;
   path: string;
   exists: boolean;
+  url?: string | null;
 }
 
 export interface ProcessView {

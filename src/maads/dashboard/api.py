@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from maads.dashboard import aggregators, store
 from maads.observability.llm_communications import LLMCommunicationRecord, record_for_export
@@ -174,6 +174,30 @@ def get_case_report_md(case_id: str) -> str:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/cases/{case_id}/reports/execution_analysis.md", response_class=PlainTextResponse)
+def get_execution_analysis_md(case_id: str) -> str:
+    try:
+        return store.read_report_text(
+            store.case_dir(_artifact_root(), case_id), "execution_analysis.md",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/cases/{case_id}/final_report.md", response_class=PlainTextResponse)
+def get_final_report_md(case_id: str) -> str:
+    from maads.artifact_paths import RunPaths
+
+    try:
+        artifact_dir = store.case_dir(_artifact_root(), case_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    path = RunPaths(artifact_dir).run_dir / "final_report.md"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="final_report.md not found")
+    return path.read_text(encoding="utf-8")
+
+
 @router.get("/cases/{case_id}/reports/improvement_bundle")
 def get_improvement_bundle(case_id: str) -> dict[str, Any]:
     try:
@@ -182,6 +206,72 @@ def get_improvement_bundle(case_id: str) -> dict[str, Any]:
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/cases/{case_id}/reports/case_workbook.ipynb")
+def get_case_workbook(case_id: str) -> FileResponse:
+    from maads.artifact_paths import RunPaths
+
+    try:
+        artifact_dir = store.case_dir(_artifact_root(), case_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    path = RunPaths(artifact_dir).reports / "case_workbook.ipynb"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="case_workbook.ipynb not found")
+    return FileResponse(
+        path,
+        media_type="application/x-ipynb+json",
+        filename=f"{case_id}_case_workbook.ipynb",
+    )
+
+
+@router.get("/cases/{case_id}/reports/workbook_context.json")
+def get_workbook_context(case_id: str) -> dict[str, Any]:
+    try:
+        return store.read_report(
+            store.case_dir(_artifact_root(), case_id), "workbook_context.json",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/cases/{case_id}/reports/handoff_standard.zip")
+def get_handoff_standard_zip(case_id: str) -> FileResponse:
+    return _handoff_file_response(case_id)
+
+
+@router.get("/cases/{case_id}/handoff.zip")
+def get_handoff_bundle(case_id: str) -> FileResponse:
+    """Legacy alias for handoff_standard.zip."""
+    return _handoff_file_response(case_id)
+
+
+def _handoff_file_response(case_id: str) -> FileResponse:
+    from maads.artifact_paths import RunPaths
+    from maads.reports.handoff import HANDOFF_ZIP_NAME, build_handoff_zip, handoff_zip_path
+    from maads.state import CrispDMState
+
+    try:
+        artifact_dir = store.case_dir(_artifact_root(), case_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    paths = RunPaths(artifact_dir)
+    zip_path = handoff_zip_path(paths)
+    if not zip_path.is_file():
+        state_path = artifact_dir / "final_state.json"
+        if not state_path.is_file():
+            raise HTTPException(status_code=404, detail="handoff bundle not available")
+        state = CrispDMState.model_validate_json(state_path.read_text(encoding="utf-8"))
+        zip_path.parent.mkdir(parents=True, exist_ok=True)
+        zip_path.write_bytes(build_handoff_zip(state, paths))
+
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=HANDOFF_ZIP_NAME,
+    )
 
 
 @router.get("/cases/{case_id}/graph")

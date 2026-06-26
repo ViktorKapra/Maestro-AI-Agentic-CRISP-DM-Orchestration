@@ -1,11 +1,14 @@
 """Evidence-backed case report (What / How / Why)."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from maads.conclusions import build_conclusions_summary
 from maads.outcome import ml_outcome_deficits, ml_run_succeeded, workflow_complete
+from maads.reports.md_paths import md_file_link
 from maads.state import CrispDMState
 
 
@@ -85,7 +88,13 @@ def build_case_report(state: CrispDMState) -> dict[str, Any]:
     }
 
 
-def render_case_report_md(report: dict[str, Any]) -> str:
+def render_case_report_md(
+    report: dict[str, Any],
+    *,
+    md_dir: Path | None = None,
+    run_dir: Path | None = None,
+    remap: Callable[[Path], Path] | None = None,
+) -> str:
     what = report.get("what") or {}
     how = report.get("how") or {}
     lines = [
@@ -108,7 +117,12 @@ def render_case_report_md(report: dict[str, Any]) -> str:
             f"(CV {chosen.get('cv_score')})"
         )
     if what.get("submission_path"):
-        lines.append(f"- **Submission:** `{what['submission_path']}`")
+        sub = what["submission_path"]
+        if md_dir is not None and run_dir is not None:
+            link = md_file_link(sub, md_dir=md_dir, run_dir=run_dir, remap=remap)
+            lines.append(f"- **Submission:** {link or sub}")
+        else:
+            lines.append(f"- **Submission:** `{sub}`")
     if what.get("decision"):
         lines.append(f"- **Decision:** {what['decision']}")
     lines.extend(["", "## How?", ""])

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from maads.artifact_paths import RunPaths
 from maads.conclusions import build_conclusions_summary
 from maads.observability.schema import TraceRun
 from maads.outcome import ml_outcome_deficits, ml_run_succeeded, workflow_complete
+from maads.reports.md_paths import md_file_link
 from maads.reports.postmortem import _sandbox_stats
 from maads.state import CrispDMState
 from maads.success_criterion import assessment_meets, criterion_direction
@@ -121,7 +123,13 @@ def build_execution_analysis(
     }
 
 
-def render_execution_analysis_md(bundle: dict[str, Any]) -> str:
+def render_execution_analysis_md(
+    bundle: dict[str, Any],
+    *,
+    md_dir: Path | None = None,
+    run_dir: Path | None = None,
+    remap: Callable[[Path], Path] | None = None,
+) -> str:
     """Render human-readable execution analysis markdown."""
     lines: list[str] = [
         f"# Execution Analysis — {bundle.get('case_id', '?')}",
@@ -250,7 +258,13 @@ def render_execution_analysis_md(bundle: dict[str, Any]) -> str:
     for key, path in deliverables.items():
         if key.endswith("_exists"):
             continue
-        lines.append(f"- **{key}:** `{path}`")
+        if not path:
+            continue
+        if md_dir is not None and run_dir is not None:
+            link = md_file_link(path, md_dir=md_dir, run_dir=run_dir, remap=remap)
+            lines.append(f"- **{key}:** {link or path}")
+        else:
+            lines.append(f"- **{key}:** `{path}`")
     lines.append("")
 
     lines.extend(["## Outcome Verdict", ""])

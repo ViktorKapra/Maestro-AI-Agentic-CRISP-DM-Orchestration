@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { HandoffDownloadLink } from "../components/HandoffDownloadLink";
 import { ProgressRail } from "../components/ProgressRail";
 import { TokenChart } from "../components/TokenChart";
 import { useCommunicationsSummary, useLiveSummary } from "../hooks/useCasePolling";
@@ -105,6 +106,11 @@ export function Overview({ caseId }: Props) {
                 )}
               </p>
             )}
+            <HandoffDownloadLink
+              caseId={caseId}
+              show={Boolean(live.halted || live.workflow_complete)}
+              className="pt-2 border-t border-surface-border/60"
+            />
           </div>
         )}
       </section>
