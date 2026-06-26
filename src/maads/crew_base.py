@@ -230,6 +230,7 @@ def agent_for(name: str, dataset_name: str = "") -> Agent:
 
 def reset_llm_caches() -> None:
     """Clear cached agents/LLMs (for tests after env changes)."""
+    from maads.knowledge_setup import domain_knowledge_sources
     from maads.rag import clear_rag_cache
 
     build_llm.cache_clear()

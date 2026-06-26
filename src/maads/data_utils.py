@@ -14,6 +14,7 @@ competition slug.
 from __future__ import annotations
 
 import subprocess
+import zipfile
 from pathlib import Path
 
 from maads.paths import resolve_path
@@ -59,11 +60,12 @@ def download_kaggle_competition(slug: str, out_dir: Path) -> Path:
             f"stderr: {proc.stderr}"
         )
 
-    # Unzip the downloaded archive(s).
-    for zipfile in out_dir.glob("*.zip"):
-        subprocess.run(["unzip", "-o", str(zipfile), "-d", str(out_dir)],
-                       check=True, capture_output=True)
-        zipfile.unlink()
+    # Unzip the downloaded archive(s) using the stdlib so this works on any
+    # platform (the `unzip` CLI is not available on Windows).
+    for archive in out_dir.glob("*.zip"):
+        with zipfile.ZipFile(archive) as zf:
+            zf.extractall(out_dir)
+        archive.unlink()
 
     print(f"Downloaded {slug} to {out_dir}")
     return out_dir

@@ -2,13 +2,17 @@
 
 Layout under ``artifacts/<case_id>/``::
 
-    current -> runs/<run_id>   # symlink to the active run
+    current                    # text file naming the active run id
     runs/<run_id>/             # one directory per ``maads run`` invocation
     archive/<run_id>/          # superseded runs (and legacy flat layouts)
 
 Each execution writes only into its own ``runs/<run_id>/`` tree. Starting a new
 run moves the previous active run into ``archive/`` and relocates any legacy
 flat artifacts that lived directly under the case folder.
+
+``current`` is a plain text pointer (not a filesystem symlink): nothing
+navigates through it as a directory, so a one-line run id is enough and avoids
+the OS-specific symlink/junction privileges Windows would otherwise require.
 """
 from __future__ import annotations
 
@@ -26,13 +30,9 @@ def case_root(artifact_root: Path, case_id: str) -> Path:
 def resolve_active_run_dir(case_root_path: Path) -> Path | None:
     """Return the directory for the live or most recent run of a case."""
     case_root_path = Path(case_root_path)
-    current = case_root_path / "current"
-    if current.is_symlink() or current.is_file():
-        target = current.resolve()
-        if target.is_dir() and (target / "status.json").is_file():
-            return target
-        if target.is_dir():
-            return target
+    target = _current_target(case_root_path)
+    if target is not None and target.is_dir():
+        return target
 
     if (case_root_path / "status.json").is_file():
         return case_root_path
@@ -67,20 +67,42 @@ def prepare_run_dir(case_root_path: Path, run_id: str) -> Path:
         dest = archive_dir / f"legacy_{stamp}"
         _relocate_children(case_root_path, dest, preserve=_PRESERVE_NAMES)
 
-    current_link = case_root_path / "current"
-    if current_link.is_symlink() or current_link.is_file():
-        prev = current_link.resolve()
-        current_link.unlink()
-        if prev.is_dir() and prev.parent == runs_dir.resolve():
-            shutil.move(str(prev), str(archive_dir / prev.name))
+    prev = _current_target(case_root_path)
+    if prev is not None and prev.is_dir() and prev.parent == runs_dir:
+        shutil.move(str(prev), str(archive_dir / prev.name))
 
     run_dir = runs_dir / run_id
     if run_dir.exists():
         raise FileExistsError(f"run directory already exists: {run_dir}")
     run_dir.mkdir(parents=True)
 
-    current_link.symlink_to(Path("runs") / run_id)
+    _write_current(case_root_path, run_id)
     return run_dir
+
+
+def _current_target(case_root_path: Path) -> Path | None:
+    """Return the run directory named by the ``current`` pointer, or ``None``.
+
+    Reads ``current`` as text. Legacy symlinks/junctions from older runs fail
+    the text read and are ignored — ``resolve_active_run_dir`` falls back to
+    scanning ``runs/`` by mtime, and the next run rewrites the pointer.
+    """
+    try:
+        run_id = (case_root_path / "current").read_text(encoding="utf-8").strip()
+    except (OSError, ValueError):
+        return None
+    return case_root_path / "runs" / run_id if run_id else None
+
+
+def _write_current(case_root_path: Path, run_id: str) -> None:
+    """Point ``current`` at ``runs/<run_id>``, replacing any prior pointer."""
+    pointer = case_root_path / "current"
+    if pointer.is_symlink() or pointer.exists():
+        try:
+            pointer.unlink()
+        except (IsADirectoryError, PermissionError, OSError):
+            pointer.rmdir()  # legacy directory junction; removes the link only
+    pointer.write_text(run_id, encoding="utf-8")
 
 
 def _has_legacy_artifacts(case_root_path: Path) -> bool:

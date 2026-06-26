@@ -28,12 +28,18 @@ _BROKEN_RUN_PATH = re.compile(r"'str\(RUN_DIR\)/([^']*)'")
 
 
 def _rewrite_quoted_paths(out: str, root_name: str, root_s: str) -> str:
-    pattern = re.compile(
-        rf"""(['"])({re.escape(root_s)})(?:/([^'"]*))?\1""",
-    )
+    # Match the root path inside a string literal regardless of how its
+    # separators are written in the source: POSIX "/", Windows native "\",
+    # or repr-escaped "\\". The relative tail is normalised to "/" so the
+    # generated ``ROOT / '...'`` literal is portable across platforms.
+    sep = r"[\\/]+"
+    parts = [re.escape(p) for p in root_s.replace("\\", "/").split("/") if p]
+    # Allow an optional leading separator so POSIX absolute roots ("/home/...")
+    # match as well as Windows drive roots ("C:\\...").
+    pattern = re.compile(rf"""(['"])(?:{sep})?{sep.join(parts)}(?:{sep}([^'"]*))?\1""")
 
     def repl(match: re.Match[str]) -> str:
-        rel = match.group(3) or ""
+        rel = re.sub(sep, "/", match.group(2) or "")
         if rel:
             return f"str({root_name} / '{rel}')"
         return f"str({root_name})"

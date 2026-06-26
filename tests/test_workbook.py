@@ -167,7 +167,7 @@ def test_api_serves_case_workbook(tmp_path: Path):
         json.dumps({"case_id": "house_prices", "phase": 6, "halted": True}),
         encoding="utf-8",
     )
-    (case / "current").symlink_to(Path("runs") / "wb-run")
+    (case / "current").write_text("wb-run", encoding="utf-8")
     state = _minimal_state("configs/house_prices.yaml", run_dir)
     write_case_workbook(state, RunPaths(run_dir))
 
