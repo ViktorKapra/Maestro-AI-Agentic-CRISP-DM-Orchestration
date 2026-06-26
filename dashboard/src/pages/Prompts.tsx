@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTheme } from "../shared/theme";
 
 const AGENTS = [
   {
@@ -157,13 +158,14 @@ Return the raw JSON payload matching the target schema. Do not include markdown 
 ];
 
 export function Prompts() {
+  const { clean } = useTheme();
   const [active, setActive] = useState("pm");
   const agent = AGENTS.find((a) => a.id === active) ?? AGENTS[0];
 
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
-        <h2 className="text-lg font-bold text-slate-200 mb-1">📝 Agent Prompts</h2>
+        <h2 className="text-lg font-bold text-slate-200 mb-1">{clean("📝 Agent Prompts")}</h2>
         <p className="text-sm text-slate-400">
           Backstories live in{" "}
           <code className="text-pink-300 text-xs">
@@ -189,7 +191,7 @@ export function Prompts() {
                 : "text-slate-400 hover:bg-surface-border hover:text-slate-200"
             }`}
           >
-            {a.emoji} {a.name}
+            {clean(a.emoji)} {a.name}
           </button>
         ))}
       </div>

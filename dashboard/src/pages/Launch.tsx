@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { fetchConfigs, postStartRun } from "../shared/api";
+import { useTheme } from "../shared/theme";
 import type { CaseConfig } from "../shared/types";
 
 type LaunchState = "idle" | "launching" | "launched" | "error";
 
 export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }) {
+  const { clean } = useTheme();
   const { data: configs, isLoading, error } = useQuery({
     queryKey: ["configs"],
     queryFn: fetchConfigs,
@@ -36,7 +38,7 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <section className="rounded-2xl border border-surface-border bg-surface-raised p-6 glow-card space-y-5">
-        <h2 className="text-xl font-bold">🚀 Launch Experiment</h2>
+        <h2 className="text-xl font-bold">{clean("🚀 Launch Experiment")}</h2>
         <p className="text-sm text-slate-400">
           Select a case configuration and start a new pipeline run. The experiment
           runs in the background — switch to the Overview tab to track progress.
@@ -46,7 +48,7 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
           <p className="text-sm text-slate-500 animate-pulse">Loading configs…</p>
         )}
         {error && (
-          <p className="text-sm text-status-halted">Failed to load configs 😢</p>
+          <p className="text-sm text-status-halted">{clean("Failed to load configs 😢")}</p>
         )}
 
         {configs && (
@@ -112,15 +114,15 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
                 disabled:opacity-40 disabled:cursor-not-allowed disabled:scale-100"
             >
               {launchState === "launching"
-                ? "Launching… ✨"
+                ? clean("Launching… ✨")
                 : launchState === "launched"
-                ? "Launched! 🎀"
-                : "Start Run 🚀"}
+                ? clean("Launched! 🎀")
+                : clean("Start Run 🚀")}
             </button>
 
             {launchState === "launched" && launchedCase && (
               <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-300">
-                <p className="font-semibold">Run started for <span className="font-mono">{launchedCase}</span> 🌸</p>
+                <p className="font-semibold">Run started for <span className="font-mono">{launchedCase}</span> {clean("🌸")}</p>
                 <p className="text-green-400/70 mt-1">
                   Switch to the <span className="font-semibold">Overview</span> tab and select{" "}
                   <span className="font-mono">{launchedCase}</span> from the case dropdown to track progress.
@@ -130,7 +132,7 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
 
             {launchState === "error" && errorMsg && (
               <div className="rounded-xl border border-status-halted/30 bg-status-halted/10 p-4 text-sm text-status-halted">
-                <p className="font-semibold">Failed to launch 😵</p>
+                <p className="font-semibold">{clean("Failed to launch 😵")}</p>
                 <p className="font-mono text-xs mt-1 break-all">{errorMsg}</p>
               </div>
             )}

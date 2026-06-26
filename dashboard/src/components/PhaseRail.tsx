@@ -1,4 +1,5 @@
 import type { ProcessPhase } from "../shared/types";
+import { useTheme } from "../shared/theme";
 
 interface Props {
   phases: ProcessPhase[] | undefined;
@@ -11,6 +12,7 @@ function phaseClasses(status: string, ready: boolean): string {
 }
 
 export function PhaseRail({ phases }: Props) {
+  const { clean } = useTheme();
   if (!phases?.length) {
     return <div className="h-16 rounded-lg bg-surface-border animate-pulse" />;
   }
@@ -23,7 +25,7 @@ export function PhaseRail({ phases }: Props) {
             className={`rounded-lg border px-3 py-2 text-sm min-w-[8rem] ${phaseClasses(phase.status, phase.ready)}`}
           >
             <div className="font-medium">
-              {phase.ready && <span className="mr-1">✓</span>}
+              {phase.ready && <span className="mr-1">{clean("✓")}</span>}
               {phase.id}. {phase.name}
             </div>
             <div className="text-xs opacity-70 capitalize">{phase.status}</div>

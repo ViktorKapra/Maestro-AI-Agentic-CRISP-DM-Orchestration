@@ -13,12 +13,40 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { GraphPayload } from "../shared/types";
+import { useTheme } from "../shared/theme";
 
+// Status-tinted backgrounds are theme tokens, so they follow the active theme.
 const STATE_STYLES: Record<string, string> = {
   idle: "border-surface-border bg-surface-raised",
-  active: "border-status-running bg-fuchsia-100 node-active",
+  active: "border-status-running bg-status-running/10 node-active",
   done: "border-status-complete bg-surface-raised opacity-80",
-  error: "border-status-halted bg-rose-100",
+  error: "border-status-halted bg-status-halted/10",
+};
+
+// Canvas chrome (edges, labels, minimap, background) per theme.
+const CANVAS_THEME = {
+  pink: {
+    colorMode: "light" as const,
+    edge: "#d6409f",
+    edgeDispatch: "#e9a8d6",
+    label: "#a98fb8",
+    background: "#f0abdc",
+    miniFlow: "#a855f7",
+    miniActive: "#d946ef",
+    miniIdle: "#e9a8d6",
+    mask: "rgba(253, 244, 255, 0.7)",
+  },
+  biz: {
+    colorMode: "dark" as const,
+    edge: "#38bdf8",
+    edgeDispatch: "#475569",
+    label: "#64748b",
+    background: "#1e293b",
+    miniFlow: "#818cf8",
+    miniActive: "#22d3ee",
+    miniIdle: "#334155",
+    mask: "rgba(15, 23, 42, 0.7)",
+  },
 };
 
 function FlowNode({ data }: NodeProps) {
@@ -71,6 +99,8 @@ interface Props {
 }
 
 export function FlowCanvas({ graph }: Props) {
+  const { theme, clean } = useTheme();
+  const ct = CANVAS_THEME[theme];
   const nodes: Node[] = useMemo(
     () =>
       (graph?.nodes ?? []).map((n) => ({
@@ -88,7 +118,7 @@ export function FlowCanvas({ graph }: Props) {
     () =>
       (graph?.edges ?? []).map((e) => {
         const isDispatch = e.edgeType === "dispatch";
-        const stroke = isDispatch ? "#e9a8d6" : "#d6409f";
+        const stroke = isDispatch ? ct.edgeDispatch : ct.edge;
         return {
           id: e.id,
           source: e.source,
@@ -101,19 +131,19 @@ export function FlowCanvas({ graph }: Props) {
           },
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            color: e.animated ? "#d6409f" : stroke,
+            color: e.animated ? ct.edge : stroke,
           },
           label: e.communication_id ?? undefined,
-          labelStyle: { fill: "#a98fb8", fontSize: 10 },
+          labelStyle: { fill: ct.label, fontSize: 10 },
         };
       }),
-    [graph],
+    [graph, ct],
   );
 
   if (!graph || nodes.length === 0) {
     return (
       <div className="flex h-[480px] items-center justify-center rounded-2xl border border-surface-border bg-surface-raised text-slate-500">
-        🦋 No architecture data yet — start a run or wait for trace export.
+        {clean("🦋 No architecture data yet — start a run or wait for trace export.")}
       </div>
     );
   }
@@ -126,17 +156,17 @@ export function FlowCanvas({ graph }: Props) {
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.2 }}
-        colorMode="light"
+        colorMode={ct.colorMode}
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#f0abdc" gap={20} />
+        <Background color={ct.background} gap={20} />
         <Controls />
         <MiniMap
           nodeColor={(n) => {
-            if (n.type === "flowNode") return "#a855f7";
-            return n.data?.state === "active" ? "#d946ef" : "#e9a8d6";
+            if (n.type === "flowNode") return ct.miniFlow;
+            return n.data?.state === "active" ? ct.miniActive : ct.miniIdle;
           }}
-          maskColor="rgba(253, 244, 255, 0.7)"
+          maskColor={ct.mask}
         />
       </ReactFlow>
     </div>

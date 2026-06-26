@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ProcessPhase } from "../shared/types";
 import { formatDuration } from "../shared/format";
+import { useTheme } from "../shared/theme";
 
 interface Props {
   phases: ProcessPhase[] | undefined;
@@ -34,6 +35,7 @@ function statusColor(status: string): string {
 }
 
 export function SubstepChecklist({ phases, currentPhase = 1 }: Props) {
+  const { clean } = useTheme();
   const [openPhases, setOpenPhases] = useState<Set<number>>(
     () => new Set([currentPhase]),
   );
@@ -70,7 +72,7 @@ export function SubstepChecklist({ phases, currentPhase = 1 }: Props) {
                 Phase {phase.id}: {phase.name}
               </span>
               <span className="text-slate-500 text-xs">
-                {doneCount}/{phase.substeps.length} done {isOpen ? "▾" : "▸"}
+                {doneCount}/{phase.substeps.length} done {isOpen ? clean("▾") : clean("▸")}
               </span>
             </button>
             {isOpen && (
@@ -83,7 +85,7 @@ export function SubstepChecklist({ phases, currentPhase = 1 }: Props) {
                     }`}
                   >
                     <span className={`w-4 text-center ${statusColor(sub.status)}`}>
-                      {statusIcon(sub.status)}
+                      {clean(statusIcon(sub.status))}
                     </span>
                     <span className="font-mono text-xs text-slate-500 w-8">
                       {sub.id}

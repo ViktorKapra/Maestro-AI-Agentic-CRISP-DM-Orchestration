@@ -10,14 +10,56 @@ import {
   YAxis,
 } from "recharts";
 import type { CommunicationRecord, CommunicationsSummary } from "../shared/types";
+import { useTheme } from "../shared/theme";
 
-const AGENT_COLORS: Record<string, string> = {
-  pm: "#d6409f", // rose-fuchsia
-  domain: "#a855f7", // lavender-purple
-  data_engineer: "#ec4899", // pink
-  data_scientist: "#c084fc", // light lavender
-  developer: "#f472b6", // bubblegum
-  storyteller: "#e879f9", // orchid (new agent)
+// Per-agent bar colours, one cohesive palette per theme.
+const AGENT_COLORS: Record<"pink" | "biz", Record<string, string>> = {
+  pink: {
+    pm: "#d6409f", // rose-fuchsia
+    domain: "#a855f7", // lavender-purple
+    data_engineer: "#ec4899", // pink
+    data_scientist: "#c084fc", // light lavender
+    developer: "#f472b6", // bubblegum
+    storyteller: "#e879f9", // orchid
+  },
+  biz: {
+    pm: "#38bdf8", // sky
+    domain: "#818cf8", // indigo
+    data_engineer: "#22d3ee", // cyan
+    data_scientist: "#34d399", // emerald
+    developer: "#a78bfa", // violet
+    storyteller: "#60a5fa", // blue
+  },
+};
+
+// Full, human-readable agent names (shared by both themes).
+const AGENT_NAMES: Record<string, string> = {
+  pm: "Project Manager",
+  domain: "Domain Expert",
+  data_engineer: "Data Engineer",
+  data_scientist: "Data Scientist",
+  developer: "Developer",
+  storyteller: "Storyteller",
+};
+
+// Chart chrome (grid, axes, tooltip, line) per theme.
+const CHART_THEME = {
+  pink: {
+    fallbackBar: "#c9a9d6",
+    grid: "#f1cde9",
+    axis: "#a98fb8",
+    tooltipBg: "#ffffff",
+    tooltipBorder: "#f1cde9",
+    line: "#d6409f",
+  },
+  biz: {
+    fallbackBar: "#475569",
+    grid: "#1e293b",
+    axis: "#64748b",
+    tooltipBg: "#0f172a",
+    tooltipBorder: "#1e293b",
+    line: "#38bdf8",
+  },
 };
 
 interface Props {
@@ -27,10 +69,14 @@ interface Props {
 }
 
 export function TokenChart({ summary, communications, tokenSpend }: Props) {
+  const { theme, clean } = useTheme();
+  const palette = AGENT_COLORS[theme];
+  const c = CHART_THEME[theme];
   const barData = Object.entries(tokenSpend ?? {}).map(([agent, tokens]) => ({
     agent,
+    name: AGENT_NAMES[agent] ?? agent,
     tokens,
-    fill: AGENT_COLORS[agent] ?? "#c9a9d6",
+    fill: palette[agent] ?? c.fallbackBar,
   }));
 
   const sparkData = (communications ?? [])
@@ -59,13 +105,15 @@ export function TokenChart({ summary, communications, tokenSpend }: Props) {
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-sm text-slate-400 mb-1 font-semibold">💎 Total tokens</p>
+        <p className="text-sm text-slate-400 mb-1 font-semibold">
+          {clean("💎 Total tokens")}
+        </p>
         <p className="text-3xl font-bold tabular-nums text-accent">
           {total.toLocaleString()}
         </p>
         {summary && (
           <p className="text-xs text-slate-500 mt-1">
-            💌 {summary.turn_count} LLM turns · avg{" "}
+            {clean("💌")} {summary.turn_count} LLM turns · avg{" "}
             {Math.round(summary.avg_duration_ms / 1000)}s per turn
           </p>
         )}
@@ -73,21 +121,23 @@ export function TokenChart({ summary, communications, tokenSpend }: Props) {
 
       {barData.length > 0 && (
         <div>
-          <p className="text-sm text-slate-400 mb-2 font-semibold">👯 By agent</p>
+          <p className="text-sm text-slate-400 mb-2 font-semibold">
+            {clean("👯 By agent")}
+          </p>
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={barData} layout="vertical" margin={{ left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1cde9" />
-              <XAxis type="number" tick={{ fill: "#a98fb8", fontSize: 11 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
+              <XAxis type="number" tick={{ fill: c.axis, fontSize: 11 }} />
               <YAxis
                 type="category"
-                dataKey="agent"
-                width={100}
-                tick={{ fill: "#a98fb8", fontSize: 11 }}
+                dataKey="name"
+                width={120}
+                tick={{ fill: c.axis, fontSize: 11 }}
               />
               <Tooltip
                 contentStyle={{
-                  background: "#ffffff",
-                  border: "1px solid #f1cde9",
+                  background: c.tooltipBg,
+                  border: `1px solid ${c.tooltipBorder}`,
                   borderRadius: 8,
                 }}
               />
@@ -99,23 +149,25 @@ export function TokenChart({ summary, communications, tokenSpend }: Props) {
 
       {sparkData.length > 1 && (
         <div>
-          <p className="text-sm text-slate-400 mb-2 font-semibold">📈 Cumulative spend</p>
+          <p className="text-sm text-slate-400 mb-2 font-semibold">
+            {clean("📈 Cumulative spend")}
+          </p>
           <ResponsiveContainer width="100%" height={120}>
             <LineChart data={sparkData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1cde9" />
-              <XAxis dataKey="time" tick={{ fill: "#a98fb8", fontSize: 10 }} />
-              <YAxis tick={{ fill: "#a98fb8", fontSize: 10 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
+              <XAxis dataKey="time" tick={{ fill: c.axis, fontSize: 10 }} />
+              <YAxis tick={{ fill: c.axis, fontSize: 10 }} />
               <Tooltip
                 contentStyle={{
-                  background: "#ffffff",
-                  border: "1px solid #f1cde9",
+                  background: c.tooltipBg,
+                  border: `1px solid ${c.tooltipBorder}`,
                   borderRadius: 8,
                 }}
               />
               <Line
                 type="monotone"
                 dataKey="cumulative"
-                stroke="#d6409f"
+                stroke={c.line}
                 dot={false}
                 strokeWidth={2}
               />
