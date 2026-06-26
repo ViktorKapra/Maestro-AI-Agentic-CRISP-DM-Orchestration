@@ -465,19 +465,22 @@ def build_process_view(
             deliverables.append(_deliverable(label, path, artifact_dir))
     case_id = status.get("case_id") or ""
     if artifact_dir is not None:
+        # Pin download links to the specific run being viewed (dir name == run_id),
+        # so a user viewing run B never downloads run A's (the case's current run).
+        run_q = f"?run_id={artifact_dir.name}"
         workbook = RunPaths(artifact_dir).reports / "case_workbook.ipynb"
         deliverables.append(_deliverable(
             "Case workbook",
             str(workbook),
             artifact_dir,
-            url=f"/api/cases/{case_id}/reports/case_workbook.ipynb" if case_id else None,
+            url=f"/api/cases/{case_id}/reports/case_workbook.ipynb{run_q}" if case_id else None,
         ))
         handoff = RunPaths(artifact_dir).reports / "handoff_standard.zip"
         deliverables.append(_deliverable(
             "Standard handoff",
             str(handoff),
             artifact_dir,
-            url=f"/api/cases/{case_id}/reports/handoff_standard.zip" if case_id else None,
+            url=f"/api/cases/{case_id}/reports/handoff_standard.zip{run_q}" if case_id else None,
         ))
 
     return {

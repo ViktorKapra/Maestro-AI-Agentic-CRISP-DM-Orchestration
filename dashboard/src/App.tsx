@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { RunStatus, TabId } from "./shared/types";
 import { BIZ_THEME_NAME, useTheme } from "./shared/theme";
 import type { ThemeId } from "./shared/theme";
-import { useCases } from "./hooks/useCasePolling";
+import { useCaseRuns, useCases } from "./hooks/useCasePolling";
+import { useSelectedRun } from "./shared/selectedRun";
 import { Overview } from "./pages/Overview";
 import { Process } from "./pages/Process";
 import { State } from "./pages/State";
@@ -90,6 +91,8 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("overview");
   const [highlightComm, setHighlightComm] = useState<string | null>(null);
   const { theme, setTheme, clean } = useTheme();
+  const { runId, setRunId } = useSelectedRun();
+  const { data: runs } = useCaseRuns(caseId);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -103,10 +106,22 @@ export default function App() {
     }
   }, [cases, caseId]);
 
+  // When the case changes, follow its active run until the user picks one.
+  useEffect(() => {
+    setRunId(null);
+  }, [caseId, setRunId]);
+
   const activeCase = useMemo(
     () => cases?.find((c) => c.case_id === caseId),
     [cases, caseId],
   );
+
+  const selectedRun = useMemo(
+    () => runs?.find((r) => r.run_id === runId),
+    [runs, runId],
+  );
+  const shownModel = selectedRun?.model ?? activeCase?.model ?? null;
+  const shownStatus = selectedRun?.status ?? activeCase?.status;
 
   const openComm = (commId: string) => {
     setHighlightComm(commId);
@@ -143,31 +158,55 @@ export default function App() {
             {activeCase && (
               <span className="flex items-center gap-2 text-sm font-semibold rounded-full bg-surface px-3 py-1 border border-surface-border">
                 <span
-                  className={`h-2.5 w-2.5 rounded-full ${statusDot(activeCase.status)} ${
-                    activeCase.status === "running" ? "node-active" : ""
+                  className={`h-2.5 w-2.5 rounded-full ${statusDot(shownStatus)} ${
+                    shownStatus === "running" ? "node-active" : ""
                   }`}
                 />
-                {clean(statusLabel(activeCase.status))}
+                {clean(statusLabel(shownStatus))}
               </span>
             )}
           </div>
 
           <div className="flex items-center gap-3">
-            <select
-              value={caseId ?? ""}
-              onChange={(e) => setCaseId(e.target.value)}
-              disabled={isLoading}
-              className="rounded-full border border-surface-border bg-surface px-4 py-1.5 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
-            >
-              {!cases?.length && (
-                <option value="">{clean("No cases 😴")}</option>
-              )}
-              {cases?.map((c) => (
-                <option key={c.case_id} value={c.case_id}>
-                  {clean(`🎀 ${c.case_id} (${c.status})`)}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <select
+                  value={caseId ?? ""}
+                  onChange={(e) => setCaseId(e.target.value)}
+                  disabled={isLoading}
+                  className="rounded-full border border-surface-border bg-surface px-4 py-1.5 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+                >
+                  {!cases?.length && (
+                    <option value="">{clean("No cases 😴")}</option>
+                  )}
+                  {cases?.map((c) => (
+                    <option key={c.case_id} value={c.case_id}>
+                      {clean(`🎀 ${c.case_id} (${c.status})`)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={runId ?? ""}
+                  onChange={(e) => setRunId(e.target.value || null)}
+                  disabled={!runs?.length}
+                  title="Pick which run of this case to view"
+                  className="rounded-full border border-surface-border bg-surface px-4 py-1.5 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40 max-w-[16rem]"
+                >
+                  <option value="">{clean("⚡ active run")}</option>
+                  {runs?.map((r, i) => (
+                    <option key={r.run_id} value={r.run_id}>
+                      {`#${(runs.length - i)} · ${r.model ?? "default"} · ${r.status}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <span
+                className="text-xs font-mono rounded-full bg-surface px-3 py-0.5 border border-surface-border text-slate-400"
+                title="LLM this run was launched with"
+              >
+                {clean("🧠 ")}{shownModel ?? "default (.env)"}
+              </span>
+            </div>
             <ThemeToggle theme={theme} onChange={setTheme} />
           </div>
         </div>

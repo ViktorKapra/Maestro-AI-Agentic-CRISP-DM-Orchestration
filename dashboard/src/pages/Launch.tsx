@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { fetchConfigs, postStartRun } from "../shared/api";
+import { useModels } from "../hooks/useCasePolling";
 import { useTheme } from "../shared/theme";
 import type { CaseConfig } from "../shared/types";
 
@@ -12,10 +13,13 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
     queryKey: ["configs"],
     queryFn: fetchConfigs,
   });
+  const { data: models } = useModels();
 
   const [selected, setSelected] = useState<string>("");
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [launchState, setLaunchState] = useState<LaunchState>("idle");
   const [launchedCase, setLaunchedCase] = useState<string | null>(null);
+  const [launchedModel, setLaunchedModel] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const activeConfig: CaseConfig | undefined = configs?.find((c) => c.case_id === selected);
@@ -25,8 +29,9 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
     setLaunchState("launching");
     setErrorMsg(null);
     try {
-      await postStartRun(selected);
+      await postStartRun(selected, selectedModel || undefined);
       setLaunchedCase(selected);
+      setLaunchedModel(selectedModel || null);
       setLaunchState("launched");
       onLaunched?.(selected);
     } catch (e) {
@@ -73,6 +78,42 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
                     {c.case_id}
                   </option>
                 ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-300" htmlFor="model-select">
+                Model
+              </label>
+              <select
+                id="model-select"
+                value={selectedModel}
+                onChange={(e) => {
+                  setSelectedModel(e.target.value);
+                  setLaunchState("idle");
+                  setErrorMsg(null);
+                }}
+                className="w-full rounded-xl border border-surface-border bg-surface px-4 py-2.5 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+              >
+                <option value="">— default (from .env) —</option>
+                {models?.ollama_cloud?.length ? (
+                  <optgroup label="Ollama Cloud">
+                    {models.ollama_cloud.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {models?.openai?.length ? (
+                  <optgroup label="OpenAI">
+                    {models.openai.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </select>
             </div>
 
@@ -123,6 +164,9 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
             {launchState === "launched" && launchedCase && (
               <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-300">
                 <p className="font-semibold">Run started for <span className="font-mono">{launchedCase}</span> {clean("🌸")}</p>
+                <p className="text-green-400/70 mt-1">
+                  Model: <span className="font-mono">{launchedModel ?? "default (.env)"}</span>
+                </p>
                 <p className="text-green-400/70 mt-1">
                   Switch to the <span className="font-semibold">Overview</span> tab and select{" "}
                   <span className="font-mono">{launchedCase}</span> from the case dropdown to track progress.
