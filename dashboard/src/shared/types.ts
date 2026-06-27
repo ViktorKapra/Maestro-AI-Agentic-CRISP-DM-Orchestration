@@ -141,7 +141,7 @@ export interface GraphPayload {
   edges: FlowEdge[];
 }
 
-export type TabId = "overview" | "process" | "state" | "communications" | "architecture" | "timeline" | "knowledge" | "framework" | "prompts" | "state_shape" | "loop_logic" | "failure_modes" | "launch";
+export type TabId = "home" | "overview" | "process" | "inspect" | "state" | "communications" | "architecture" | "framework" | "prompts" | "state_shape" | "failure_modes" | "launch";
 
 export interface CaseConfig {
   case_id: string;

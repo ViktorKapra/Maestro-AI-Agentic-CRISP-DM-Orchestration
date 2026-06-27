@@ -3,6 +3,7 @@ import { useState } from "react";
 import { fetchConfigs, postStartRun } from "../shared/api";
 import { useModels } from "../hooks/useCasePolling";
 import { useTheme } from "../shared/theme";
+import { prettyCase } from "../shared/format";
 import type { CaseConfig } from "../shared/types";
 
 type LaunchState = "idle" | "launching" | "launched" | "error";
@@ -75,7 +76,7 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
                 <option value="">— pick a case —</option>
                 {configs.map((c) => (
                   <option key={c.case_id} value={c.case_id}>
-                    {c.case_id}
+                    {prettyCase(c.case_id)}
                   </option>
                 ))}
               </select>

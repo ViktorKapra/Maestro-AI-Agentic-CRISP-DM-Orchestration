@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { JsonTree } from "../components/JsonTree";
+import { Loading } from "../components/Loading";
 import { StateSection } from "../components/StateSection";
 import { useCrispDMState } from "../hooks/useCasePolling";
 
@@ -50,7 +51,7 @@ export function State({ caseId }: Props) {
   }
 
   if (isLoading && !payload) {
-    return <p className="text-slate-500">Loading state…</p>;
+    return <Loading label="Loading state…" />;
   }
 
   if (!state || Object.keys(state).length === 0) {
@@ -79,7 +80,10 @@ export function State({ caseId }: Props) {
             </p>
           )}
           {Boolean(state.halted) && state.halt_reason != null && (
-            <p className="text-red-400">Halted: {String(state.halt_reason)}</p>
+            <p className="text-sm text-slate-400">
+              <span className="font-semibold text-slate-300">Halted:</span>{" "}
+              {String(state.halt_reason)}
+            </p>
           )}
         </div>
         <span

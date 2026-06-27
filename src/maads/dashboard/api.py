@@ -343,18 +343,34 @@ def list_configs() -> list[dict[str, Any]]:
 
     configs_dir = repo_root() / "configs"
     result = []
+    # Several config files may declare the same case_id (e.g. titanic.yaml and a
+    # titanic_loopdemo.yaml). Only the file whose stem matches case_id is
+    # launchable (start_run resolves {case_id}.yaml), so dedupe to one entry per
+    # case_id and keep the canonical file when present.
+    seen: dict[str, bool] = {}
     for yaml_path in sorted(configs_dir.glob("*.yaml")):
         try:
             raw = _yaml.safe_load(yaml_path.read_text())
-            result.append({
-                "case_id": raw.get("case_id", yaml_path.stem),
+            case_id = raw.get("case_id", yaml_path.stem)
+            entry = {
+                "case_id": case_id,
                 "problem_type": raw.get("problem_type"),
                 "evaluation_metric": raw.get("evaluation_metric"),
                 "problem_statement": (raw.get("problem_statement") or "").strip(),
                 "success_threshold": (raw.get("success_criterion") or {}).get("threshold"),
-            })
+            }
         except Exception:
-            result.append({"case_id": yaml_path.stem, "problem_type": None, "evaluation_metric": None, "problem_statement": None, "success_threshold": None})
+            case_id = yaml_path.stem
+            entry = {"case_id": case_id, "problem_type": None, "evaluation_metric": None, "problem_statement": None, "success_threshold": None}
+        canonical = yaml_path.stem == case_id
+        if case_id in seen:
+            if canonical:
+                # Replace the previously kept non-canonical entry.
+                result = [e for e in result if e["case_id"] != case_id]
+            else:
+                continue
+        seen[case_id] = True
+        result.append(entry)
     return result
 
 

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type MouseEvent } from "react";
 import {
   Background,
   Controls,
@@ -14,6 +14,10 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { GraphPayload } from "../shared/types";
 import { useTheme } from "../shared/theme";
+import { AGENTS } from "../pages/Prompts";
+
+// Map a diagram agent node (by its display label) to its prompt metadata.
+const AGENT_BY_NAME = new Map(AGENTS.map((a) => [a.name, a]));
 
 // Status-tinted backgrounds are theme tokens, so they follow the active theme.
 const STATE_STYLES: Record<string, string> = {
@@ -66,7 +70,7 @@ function AgentNode({ data }: NodeProps) {
   const state = (data.state as string) ?? "idle";
   return (
     <div
-      className={`rounded-lg border-2 px-4 py-2 min-w-[130px] text-center shadow-lg ${STATE_STYLES[state] ?? STATE_STYLES.idle}`}
+      className={`cursor-pointer rounded-lg border-2 px-4 py-2 min-w-[130px] text-center shadow-lg transition-shadow hover:ring-2 hover:ring-accent/50 ${STATE_STYLES[state] ?? STATE_STYLES.idle}`}
     >
       <Handle type="target" position={Position.Left} className="!bg-accent" />
       <div className="text-sm font-medium">{data.label as string}</div>
@@ -96,11 +100,13 @@ const nodeTypes = {
 
 interface Props {
   graph: GraphPayload | undefined;
+  onOpenPrompt?: (agentId: string) => void;
 }
 
-export function FlowCanvas({ graph }: Props) {
+export function FlowCanvas({ graph, onOpenPrompt }: Props) {
   const { theme, clean } = useTheme();
   const ct = CANVAS_THEME[theme];
+
   const nodes: Node[] = useMemo(
     () =>
       (graph?.nodes ?? []).map((n) => ({
@@ -133,8 +139,6 @@ export function FlowCanvas({ graph }: Props) {
             type: MarkerType.ArrowClosed,
             color: e.animated ? ct.edge : stroke,
           },
-          label: e.communication_id ?? undefined,
-          labelStyle: { fill: ct.label, fontSize: 10 },
         };
       }),
     [graph, ct],
@@ -148,8 +152,13 @@ export function FlowCanvas({ graph }: Props) {
     );
   }
 
+  const handleClick = (_e: MouseEvent, node: Node) => {
+    const agent = AGENT_BY_NAME.get(String(node.data?.label));
+    if (agent) onOpenPrompt?.(agent.id);
+  };
+
   return (
-    <div className="h-[560px] rounded-2xl border border-surface-border overflow-hidden glow-card">
+    <div className="relative h-[560px] rounded-2xl border border-surface-border overflow-hidden glow-card">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -158,6 +167,7 @@ export function FlowCanvas({ graph }: Props) {
         fitViewOptions={{ padding: 0.2 }}
         colorMode={ct.colorMode}
         proOptions={{ hideAttribution: true }}
+        onNodeClick={handleClick}
       >
         <Background color={ct.background} gap={20} />
         <Controls />

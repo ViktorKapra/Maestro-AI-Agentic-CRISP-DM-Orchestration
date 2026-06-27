@@ -28,6 +28,24 @@ function useElapsedMs(live: LiveSummary | undefined): number | null {
   return Math.max(0, end - start);
 }
 
+function Chip({
+  label,
+  value,
+  dot,
+}: {
+  label: string;
+  value: string;
+  dot?: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-xs">
+      {dot && <span className={`h-2 w-2 rounded-full ${dot}`} />}
+      <span className="font-semibold text-slate-400">{label}</span>
+      <span className="font-medium text-slate-200">{value}</span>
+    </span>
+  );
+}
+
 function statusFromLive(live: LiveSummary): StatusPayload {
   return {
     updated_at: live.updated_at,
@@ -59,8 +77,33 @@ export function Overview({ caseId }: Props) {
   const isRunning = live != null && !live.halted && live.trace.ended_at == null;
   const status = live ? statusFromLive(live) : undefined;
 
+  const runStatus = live?.halted
+    ? { label: "Halted", dot: "bg-status-halted", active: false }
+    : live?.workflow_complete || live?.trace.ended_at
+    ? { label: "Complete", dot: "bg-status-complete", active: false }
+    : { label: "Running", dot: "bg-status-running", active: true };
+
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="space-y-6">
+      {live && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="flex items-center gap-2 rounded-full border border-surface-border bg-surface px-3 py-1 text-sm font-semibold">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${runStatus.dot} ${
+                runStatus.active ? "node-active" : ""
+              }`}
+            />
+            {runStatus.label}
+          </span>
+          <p className="text-sm font-medium text-slate-400">
+            Phase {live.phase} — {live.phase_name} ·{" "}
+            {live.progress.completed_substeps}/{live.progress.total_substeps}{" "}
+            substeps
+          </p>
+        </div>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
       <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 space-y-4 glow-card">
         <h2 className="text-lg font-bold">{clean("📊 Progress")}</h2>
         {elapsedMs != null && (
@@ -78,40 +121,26 @@ export function Overview({ caseId }: Props) {
         )}
         <ProgressRail status={status} />
         {live && (
-          <div className="space-y-2 text-sm">
-            <p>
-              <span className="text-slate-400 font-semibold">{clean("🌷 Phase:")}</span>{" "}
-              {live.phase} — {live.phase_name}
-            </p>
-            <p>
-              <span className="text-slate-400 font-semibold">{clean("🧩 Substep:")}</span>{" "}
-              {live.substep} — {live.substep_name}
-            </p>
-            <p className="text-slate-300">{clean("💭")} {live.activity}</p>
-            {live.halted && (
-              <p className="text-status-halted font-semibold">{clean("😵 Halted:")} {live.halt_reason}</p>
-            )}
-            {live.workflow_complete != null && (
-              <p>
-                <span className="text-slate-400 font-semibold">{clean("🎀 Workflow:")}</span>{" "}
-                {live.workflow_complete ? "complete" : "incomplete"}
-              </p>
-            )}
-            {live.ml_success != null && (
-              <p className={live.ml_success ? "text-green-400" : "text-amber-400"}>
-                ML outcome: {live.ml_success ? clean("success ✨") : clean("failed 😵")}
-                {live.ml_deficits && live.ml_deficits.length > 0 && (
-                  <span className="text-slate-400">
-                    {" "}
-                    ({live.ml_deficits.join("; ")})
-                  </span>
-                )}
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Chip label="Substep" value={`${live.substep} · ${live.substep_name}`} />
+              {live.ml_success != null && (
+                <Chip
+                  dot={live.ml_success ? "bg-status-complete" : "bg-amber-400"}
+                  label="ML outcome"
+                  value={live.ml_success ? "success" : "needs another pass"}
+                />
+              )}
+            </div>
+            {(live.halt_reason || (live.ml_deficits?.length ?? 0) > 0) && (
+              <p className="text-sm leading-relaxed text-slate-400">
+                {live.halt_reason ?? live.ml_deficits?.join("; ")}
               </p>
             )}
             <HandoffDownloadLink
               caseId={caseId}
               show={Boolean(live.halted || live.workflow_complete)}
-              className="pt-2 border-t border-surface-border/60"
+              className="pt-3 border-t border-surface-border/60"
             />
           </div>
         )}
@@ -156,6 +185,7 @@ export function Overview({ caseId }: Props) {
           </p>
         )}
       </section>
+      </div>
     </div>
   );
 }

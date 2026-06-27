@@ -180,6 +180,51 @@ body::before {
   box-shadow: var(--card-glow);
 }
 
+/* staggered entrance reveal (hero elements) */
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.reveal {
+  opacity: 0;
+  animation: reveal-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+/* quick fade-in (hover tooltips) */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-in {
+  animation: fade-in 0.16s ease-out both;
+}
+
+/* horizontally scrollable rows (e.g. the tab bar) without a visible bar */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* ──────────────────────────────────────────────────────────────
    Brand gradient remap. The title, active tab and primary buttons
    use hardcoded Tailwind pink gradient stops. Re-point those exact
