@@ -57,11 +57,18 @@ def resolve_model_for_agent(agent_name: str) -> str:
 
     Resolution order:
 
+        0. ``MAADS_MODEL_OVERRIDE`` — authoritative for ALL agents (set by a
+           per-run UI/CLI model choice). Wins over every per-role override below
+           so picking a model in the dashboard works without editing ``.env``.
         1. ``MODEL_<AGENT>`` per-role override (e.g. ``MODEL_DEVELOPER``)
         2. ``MODEL_CODE`` / ``OPENAI_MODEL_CODE`` for code-authoring roles
         3. ``MODEL_JSON`` for structured-JSON roles (Ollama path)
         4. ``MODEL`` default (Ollama) or OpenAI tiering from ``agents.yaml`` tier
     """
+    forced = _env_model("MAADS_MODEL_OVERRIDE")
+    if forced:
+        return forced
+
     override = _env_model(f"MODEL_{agent_name.upper()}")
     if override:
         return override
@@ -97,6 +104,11 @@ def structured_outputs_enabled(agent_name: str, model: str) -> bool:
         return False
     if model.startswith("ollama/"):
         return setting in {"1", "true", "yes", "on", "force"}
+    # OpenAI: code-authoring agents must return a ```python block, not a JSON
+    # object. Forcing response_format would make the model emit JSON, which
+    # codegen._extract_code then writes verbatim as a .py file (SyntaxError).
+    if agent_name in _CODE_AGENTS:
+        return False
     if setting in {"1", "true", "yes", "on", "force"}:
         return True
     return setting == "auto"

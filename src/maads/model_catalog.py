@@ -26,13 +26,14 @@ OLLAMA_CLOUD_MODELS: list[dict[str, str]] = [
     {"id": "ollama/qwen3.5:122b-cloud", "label": "Qwen3.5 122b (cloud)"},
 ]
 
-# OpenAI / ChatGPT API models (require OPENAI_API_KEY).
+# OpenAI / ChatGPT API models (require OPENAI_API_KEY). Current as of 2026-06;
+# IDs from https://developers.openai.com/api/docs/models/all
 OPENAI_MODELS: list[dict[str, str]] = [
-    {"id": "gpt-4o", "label": "GPT-4o"},
-    {"id": "gpt-4o-mini", "label": "GPT-4o mini"},
-    {"id": "o4-mini", "label": "o4-mini"},
-    {"id": "gpt-4.1", "label": "GPT-4.1"},
-    {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"},
+    {"id": "gpt-5.5", "label": "GPT-5.5 (flagship)"},
+    {"id": "gpt-5.5-pro", "label": "GPT-5.5 Pro"},
+    {"id": "gpt-5.4", "label": "GPT-5.4"},
+    {"id": "gpt-5.4-mini", "label": "GPT-5.4 mini"},
+    {"id": "gpt-5.4-nano", "label": "GPT-5.4 nano (cheapest)"},
 ]
 
 
