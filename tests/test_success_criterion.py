@@ -49,11 +49,32 @@ def test_normalize_assessment_recomputes_meets_from_score():
 def test_assessment_meets_reads_either_field():
     assert assessment_meets({"meets": True}) is True
     assert assessment_meets({"success_criterion_met": True}) is True
+    assert assessment_meets({"meets_success_criterion": True}) is True
     assert assessment_meets({"meets": False, "success_criterion_met": True}) is False
     assert assessment_meets(None) is False
 
 
-def test_assessment_summary_phrase_direction_aware():
+def test_normalize_assessment_coerces_nested_achieved_score():
+    out = normalize_assessment(
+        {
+            "success_threshold": 0.78,
+            "achieved_score": {
+                "cv_mean": 0.7519275973248275,
+                "cv_std": 0.01620300942747244,
+            },
+            "meets_success_criterion": False,
+        },
+        metric="f1",
+        threshold=0.78,
+    )
+    assert out["achieved_score"] == 0.7519275973248275
+    assert out["cv_score"] == 0.7519275973248275
+    assert out["threshold"] == 0.78
+    assert out["meets"] is False
+    assert out["success_criterion_met"] is False
+
+
+def test_assessment_summary_phrase_handles_nested_achieved_score():
     assert assessment_summary_phrase(
         {"metric": "rmse_log", "direction": "minimize", "meets": True},
         cv_score=0.1355,
@@ -65,4 +86,12 @@ def test_assessment_summary_phrase_direction_aware():
     assert "below threshold" in assessment_summary_phrase(
         {"metric": "accuracy", "direction": "maximize", "meets": False},
         cv_score=0.70,
+    )
+    assert "below threshold" in assessment_summary_phrase(
+        {
+            "metric": "f1",
+            "direction": "maximize",
+            "meets": False,
+            "achieved_score": {"cv_mean": 0.7519},
+        },
     )

@@ -119,10 +119,10 @@ def run_substep(ctx: RunContext, substep: str) -> bool:
 def execute_substep(ctx: RunContext, substep: str) -> bool:
     """Run one substep and emit trace events for dashboard dispatch edges."""
     trace_substep_dispatch(ctx.state, substep)
-    try:
-        return run_substep(ctx, substep)
-    finally:
+    ok = run_substep(ctx, substep)
+    if ok:
         trace_substep_end(substep)
+    return ok
 
 
 def apply_loop(

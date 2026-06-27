@@ -36,6 +36,35 @@ from maads.outcome import ml_outcome_deficits, ml_run_succeeded, workflow_comple
 from maads.state import CrispDMState
 
 
+def _persist_run_outcome(
+    state: CrispDMState,
+    artifact_dir: Path,
+    case_dir: Path,
+) -> tuple[Path, "RunPaths"]:
+    """Write final state and reports; safe to call from ``finally``."""
+    from maads.artifact_paths import RunPaths
+    from maads.dashboard.store import read_communications
+    from maads.observability.collector import get_collector
+    from maads.reports import write_run_reports
+
+    state_path = artifact_dir / "final_state.json"
+    state_path.write_text(state.model_dump_json(indent=2))
+    paths = RunPaths(artifact_dir)
+    try:
+        trace = get_collector().to_trace_run()
+        comms = read_communications(artifact_dir)
+        write_run_reports(
+            state,
+            artifact_dir,
+            trace=trace,
+            communications=comms,
+            case_root=case_dir,
+        )
+    except Exception as exc:
+        print(f"WARNING: report generation failed: {exc}", file=sys.stderr)
+    return state_path, paths
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     configure_crewai_runtime()
@@ -207,10 +236,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     begin_run(config.case_id, artifact_dir, run_id=run_id)
     halt_reason: str | None = None
     interrupted = False
+    run_failed = False
+    state_path: Path | None = None
+    paths = None
     try:
         from maads.flow.crisp_dm_flow import CrispDMFlow
 
         state = CrispDMFlow(state, artifact_dir).run()
+        if not state.halted and not workflow_complete(state):
+            from maads.flow.phase_runner import force_halt
+
+            force_halt(state, "flow ended before workflow completion")
         if shutdown_requested() and not state.halted:
             halt_reason = apply_interrupt_to_state(state)
             interrupted = True
@@ -220,29 +256,19 @@ def cmd_run(args: argparse.Namespace) -> int:
         halt_reason = apply_interrupt_to_state(state)
         interrupted = True
         print("\nForced quit.", file=sys.stderr)
+    except Exception as exc:
+        run_failed = True
+        if not state.halted:
+            from maads.flow.phase_runner import force_halt
+
+            force_halt(state, f"run failed: {type(exc).__name__}: {exc}")
+        halt_reason = state.halt_reason
+        print(f"\nRun failed: {exc}", file=sys.stderr)
     finally:
         flush_status()
         end_run(artifact_dir)
         stop_progress(halt_reason, ml_success=ml_run_succeeded(state))
-
-    state_path = artifact_dir / "final_state.json"
-    state_path.write_text(state.model_dump_json(indent=2))
-
-    from maads.artifact_paths import RunPaths
-    from maads.dashboard.store import read_communications
-    from maads.observability.collector import get_collector
-    from maads.reports import write_run_reports
-
-    paths = RunPaths(artifact_dir)
-    trace = get_collector().to_trace_run()
-    comms = read_communications(artifact_dir)
-    write_run_reports(
-        state,
-        artifact_dir,
-        trace=trace,
-        communications=comms,
-        case_root=case_dir,
-    )
+        state_path, paths = _persist_run_outcome(state, artifact_dir, case_dir)
 
     print(f"Halted: {state.halt_reason}")
     print(f"Workflow: {'complete' if workflow_complete(state) else 'incomplete'}")
@@ -258,6 +284,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"Reports:     {paths.reports}/")
     if interrupted:
         return 130
+    if run_failed:
+        return 1
     return 0 if ml_run_succeeded(state) else 1
 
 
