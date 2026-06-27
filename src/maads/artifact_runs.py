@@ -6,9 +6,11 @@ Layout under ``artifacts/<case_id>/``::
     runs/<run_id>/             # one directory per ``maads run`` invocation
     archive/<run_id>/          # superseded runs (and legacy flat layouts)
 
-Each execution writes only into its own ``runs/<run_id>/`` tree. Starting a new
-run moves the previous active run into ``archive/`` and relocates any legacy
-flat artifacts that lived directly under the case folder.
+Each execution writes only into its own ``runs/<run_id>/`` tree. Runs accumulate
+under ``runs/`` so several executions of the same case can run concurrently
+without disturbing one another; starting a new run only relocates any legacy
+flat artifacts that lived directly under the case folder and repoints ``current``
+at the newly started run.
 
 ``current`` is a plain text pointer (not a filesystem symlink): nothing
 navigates through it as a directory, so a one-line run id is enough and avoids
@@ -67,10 +69,9 @@ def prepare_run_dir(case_root_path: Path, run_id: str) -> Path:
         dest = archive_dir / f"legacy_{stamp}"
         _relocate_children(case_root_path, dest, preserve=_PRESERVE_NAMES)
 
-    prev = _current_target(case_root_path)
-    if prev is not None and prev.is_dir() and prev.parent == runs_dir:
-        shutil.move(str(prev), str(archive_dir / prev.name))
-
+    # Note: prior runs are deliberately NOT archived here. Several runs of the
+    # same case may execute concurrently, so moving a previous run dir (which a
+    # live process may still be writing) would corrupt it.
     run_dir = runs_dir / run_id
     if run_dir.exists():
         raise FileExistsError(f"run directory already exists: {run_dir}")

@@ -235,3 +235,8 @@ dashboard/dist/
 
 # TypeScript incremental build info
 *.tsbuildinfo
+
+# Locally downloaded tooling (Node.js, etc.) — not project code
+.tools/
+
+uv.lock

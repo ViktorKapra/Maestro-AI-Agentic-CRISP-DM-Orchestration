@@ -1,19 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { fetchConfigs, postStartRun } from "../shared/api";
+import { useModels } from "../hooks/useCasePolling";
+import { useTheme } from "../shared/theme";
 import type { CaseConfig } from "../shared/types";
 
 type LaunchState = "idle" | "launching" | "launched" | "error";
 
 export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }) {
+  const { clean } = useTheme();
   const { data: configs, isLoading, error } = useQuery({
     queryKey: ["configs"],
     queryFn: fetchConfigs,
   });
+  const { data: models } = useModels();
 
   const [selected, setSelected] = useState<string>("");
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [launchState, setLaunchState] = useState<LaunchState>("idle");
   const [launchedCase, setLaunchedCase] = useState<string | null>(null);
+  const [launchedModel, setLaunchedModel] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const activeConfig: CaseConfig | undefined = configs?.find((c) => c.case_id === selected);
@@ -23,8 +29,9 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
     setLaunchState("launching");
     setErrorMsg(null);
     try {
-      await postStartRun(selected);
+      await postStartRun(selected, selectedModel || undefined);
       setLaunchedCase(selected);
+      setLaunchedModel(selectedModel || null);
       setLaunchState("launched");
       onLaunched?.(selected);
     } catch (e) {
@@ -36,7 +43,7 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <section className="rounded-2xl border border-surface-border bg-surface-raised p-6 glow-card space-y-5">
-        <h2 className="text-xl font-bold">🚀 Launch Experiment</h2>
+        <h2 className="text-xl font-bold">{clean("🚀 Launch Experiment")}</h2>
         <p className="text-sm text-slate-400">
           Select a case configuration and start a new pipeline run. The experiment
           runs in the background — switch to the Overview tab to track progress.
@@ -46,7 +53,7 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
           <p className="text-sm text-slate-500 animate-pulse">Loading configs…</p>
         )}
         {error && (
-          <p className="text-sm text-status-halted">Failed to load configs 😢</p>
+          <p className="text-sm text-status-halted">{clean("Failed to load configs 😢")}</p>
         )}
 
         {configs && (
@@ -71,6 +78,42 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
                     {c.case_id}
                   </option>
                 ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-300" htmlFor="model-select">
+                Model
+              </label>
+              <select
+                id="model-select"
+                value={selectedModel}
+                onChange={(e) => {
+                  setSelectedModel(e.target.value);
+                  setLaunchState("idle");
+                  setErrorMsg(null);
+                }}
+                className="w-full rounded-xl border border-surface-border bg-surface px-4 py-2.5 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+              >
+                <option value="">— default (from .env) —</option>
+                {models?.ollama_cloud?.length ? (
+                  <optgroup label="Ollama Cloud">
+                    {models.ollama_cloud.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {models?.openai?.length ? (
+                  <optgroup label="OpenAI">
+                    {models.openai.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </select>
             </div>
 
@@ -112,15 +155,18 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
                 disabled:opacity-40 disabled:cursor-not-allowed disabled:scale-100"
             >
               {launchState === "launching"
-                ? "Launching… ✨"
+                ? clean("Launching… ✨")
                 : launchState === "launched"
-                ? "Launched! 🎀"
-                : "Start Run 🚀"}
+                ? clean("Launched! 🎀")
+                : clean("Start Run 🚀")}
             </button>
 
             {launchState === "launched" && launchedCase && (
               <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-300">
-                <p className="font-semibold">Run started for <span className="font-mono">{launchedCase}</span> 🌸</p>
+                <p className="font-semibold">Run started for <span className="font-mono">{launchedCase}</span> {clean("🌸")}</p>
+                <p className="text-green-400/70 mt-1">
+                  Model: <span className="font-mono">{launchedModel ?? "default (.env)"}</span>
+                </p>
                 <p className="text-green-400/70 mt-1">
                   Switch to the <span className="font-semibold">Overview</span> tab and select{" "}
                   <span className="font-mono">{launchedCase}</span> from the case dropdown to track progress.
@@ -130,7 +176,7 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
 
             {launchState === "error" && errorMsg && (
               <div className="rounded-xl border border-status-halted/30 bg-status-halted/10 p-4 text-sm text-status-halted">
-                <p className="font-semibold">Failed to launch 😵</p>
+                <p className="font-semibold">{clean("Failed to launch 😵")}</p>
                 <p className="font-mono text-xs mt-1 break-all">{errorMsg}</p>
               </div>
             )}

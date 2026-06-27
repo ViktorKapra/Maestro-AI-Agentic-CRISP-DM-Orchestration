@@ -1,3 +1,5 @@
+import { useSelectedRun } from "../shared/selectedRun";
+
 interface Props {
   caseId: string;
   show: boolean;
@@ -5,14 +7,19 @@ interface Props {
 }
 
 export function HandoffDownloadLink({ caseId, show, className = "" }: Props) {
+  const { runId } = useSelectedRun();
   if (!show) {
     return null;
   }
 
+  const href = `/api/cases/${caseId}/reports/handoff_standard.zip${
+    runId ? `?run_id=${encodeURIComponent(runId)}` : ""
+  }`;
+
   return (
     <p className={`text-xs text-slate-500 ${className}`.trim()}>
       <a
-        href={`/api/cases/${caseId}/reports/handoff_standard.zip`}
+        href={href}
         className="text-accent hover:underline"
         download="handoff_standard.zip"
       >

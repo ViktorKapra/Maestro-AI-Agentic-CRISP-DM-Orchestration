@@ -1,3 +1,5 @@
+import { useTheme } from "../shared/theme";
+
 const GIT_HISTORY = [
   {
     hash: "54177d7",
@@ -110,10 +112,11 @@ const CODE_FAILURES = [
 ];
 
 export function FailureModes() {
+  const { clean } = useTheme();
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
-        <h2 className="text-lg font-bold text-slate-200 mb-1">🩹 Failure Modes — Honest Log</h2>
+        <h2 className="text-lg font-bold text-slate-200 mb-1">{clean("🩹 Failure Modes — Honest Log")}</h2>
         <p className="text-sm text-slate-400">
           Every class of failure this system has hit, plus how it was fixed — sourced from the
           git history and the debug/repair code. No sugarcoating.
@@ -123,7 +126,7 @@ export function FailureModes() {
       {/* Git history failures */}
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
         <h3 className="text-sm font-bold text-slate-300 mb-4">
-          📜 From git history
+          {clean("📜 From git history")}
         </h3>
         <div className="space-y-4">
           {GIT_HISTORY.map((entry) => (
@@ -154,13 +157,13 @@ export function FailureModes() {
       {/* Runtime failure classes */}
       <div className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
         <h3 className="text-sm font-bold text-slate-300 mb-4">
-          ⚙️ Runtime failure classes (from code)
+          {clean("⚙️ Runtime failure classes (from code)")}
         </h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {CODE_FAILURES.map((f) => (
             <div key={f.class} className={`rounded-2xl border ${f.color} p-4 glow-card`}>
               <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">{f.emoji}</span>
+                <span className="text-xl">{clean(f.emoji)}</span>
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${f.badge}`}>
                   {f.class}
                 </span>
@@ -195,7 +198,7 @@ export function FailureModes() {
       {/* What is not auto-recovered */}
       <div className="rounded-2xl border border-amber-500/30 bg-amber-900/10 p-5 glow-card">
         <h3 className="text-sm font-bold text-amber-300 mb-3">
-          ⚠️ What is NOT auto-recovered
+          {clean("⚠️ What is NOT auto-recovered")}
         </h3>
         <ul className="space-y-2 text-sm text-slate-400">
           {[

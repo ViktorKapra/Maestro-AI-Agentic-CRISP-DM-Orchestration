@@ -6,8 +6,10 @@ import type {
   CrispDMStatePayload,
   GraphPayload,
   LiveSummary,
+  ModelCatalog,
   ProcessView,
   RagView,
+  RunSummary,
   StatusPayload,
   TraceSummary,
 } from "./types";
@@ -22,70 +24,94 @@ async function fetchJson<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Append a run_id query param (and optional extras) to a case-scoped path. */
+function withRun(
+  path: string,
+  runId?: string | null,
+  extra?: Record<string, string>,
+): string {
+  const params = new URLSearchParams(extra);
+  if (runId) params.set("run_id", runId);
+  const qs = params.toString();
+  return `${API}${path}${qs ? `?${qs}` : ""}`;
+}
+
 export function fetchCases(): Promise<CaseSummary[]> {
   return fetchJson(`${API}/cases`);
 }
 
-export function fetchLiveSummary(caseId: string): Promise<LiveSummary> {
-  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/live_summary`);
+export function fetchCaseRuns(caseId: string): Promise<RunSummary[]> {
+  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/runs`);
 }
 
-export function fetchStatus(caseId: string): Promise<StatusPayload> {
-  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/status`);
+export function fetchLiveSummary(caseId: string, runId?: string | null): Promise<LiveSummary> {
+  return fetchJson(withRun(`/cases/${encodeURIComponent(caseId)}/live_summary`, runId));
 }
 
-export function fetchTraceSummary(caseId: string): Promise<TraceSummary> {
+export function fetchStatus(caseId: string, runId?: string | null): Promise<StatusPayload> {
+  return fetchJson(withRun(`/cases/${encodeURIComponent(caseId)}/status`, runId));
+}
+
+export function fetchTraceSummary(caseId: string, runId?: string | null): Promise<TraceSummary> {
   return fetchJson(
-    `${API}/cases/${encodeURIComponent(caseId)}/trace/summary?limit=50`,
+    withRun(`/cases/${encodeURIComponent(caseId)}/trace/summary`, runId, { limit: "50" }),
   );
 }
 
 export function fetchCommunications(
   caseId: string,
   opts?: { sinceId?: string; limit?: number },
+  runId?: string | null,
 ): Promise<CommunicationRecord[]> {
-  const params = new URLSearchParams();
-  if (opts?.sinceId) params.set("since_id", opts.sinceId);
-  if (opts?.limit) params.set("limit", String(opts.limit));
-  const qs = params.toString();
+  const extra: Record<string, string> = {};
+  if (opts?.sinceId) extra.since_id = opts.sinceId;
+  if (opts?.limit) extra.limit = String(opts.limit);
   return fetchJson(
-    `${API}/cases/${encodeURIComponent(caseId)}/communications${qs ? `?${qs}` : ""}`,
+    withRun(`/cases/${encodeURIComponent(caseId)}/communications`, runId, extra),
   );
 }
 
 export function fetchCommunicationsSummary(
   caseId: string,
+  runId?: string | null,
 ): Promise<CommunicationsSummary> {
   return fetchJson(
-    `${API}/cases/${encodeURIComponent(caseId)}/communications/summary`,
+    withRun(`/cases/${encodeURIComponent(caseId)}/communications/summary`, runId),
   );
 }
 
-export function fetchGraph(caseId: string): Promise<GraphPayload> {
-  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/graph`);
+export function fetchGraph(caseId: string, runId?: string | null): Promise<GraphPayload> {
+  return fetchJson(withRun(`/cases/${encodeURIComponent(caseId)}/graph`, runId));
 }
 
-export function fetchProcess(caseId: string): Promise<ProcessView> {
-  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/process`);
+export function fetchProcess(caseId: string, runId?: string | null): Promise<ProcessView> {
+  return fetchJson(withRun(`/cases/${encodeURIComponent(caseId)}/process`, runId));
 }
 
-export function fetchState(caseId: string): Promise<CrispDMStatePayload> {
-  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/state`);
+export function fetchState(caseId: string, runId?: string | null): Promise<CrispDMStatePayload> {
+  return fetchJson(withRun(`/cases/${encodeURIComponent(caseId)}/state`, runId));
 }
 
-export function fetchRag(caseId: string): Promise<RagView> {
-  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/rag`);
+export function fetchRag(caseId: string, runId?: string | null): Promise<RagView> {
+  return fetchJson(withRun(`/cases/${encodeURIComponent(caseId)}/rag`, runId));
 }
 
 export function fetchConfigs(): Promise<CaseConfig[]> {
   return fetchJson(`${API}/configs`);
 }
 
-export async function postStartRun(caseId: string): Promise<{ status: string; case_id: string; pid: number }> {
+export function fetchModels(): Promise<ModelCatalog> {
+  return fetchJson(`${API}/models`);
+}
+
+export async function postStartRun(
+  caseId: string,
+  model?: string,
+): Promise<{ status: string; case_id: string; model: string | null; pid: number }> {
   const res = await fetch(`${API}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ case_id: caseId }),
+    body: JSON.stringify({ case_id: caseId, model: model ?? null }),
   });
   if (!res.ok) {
     const text = await res.text();

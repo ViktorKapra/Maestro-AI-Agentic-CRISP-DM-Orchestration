@@ -4,6 +4,7 @@ import { ProgressRail } from "../components/ProgressRail";
 import { TokenChart } from "../components/TokenChart";
 import { useCommunicationsSummary, useLiveSummary } from "../hooks/useCasePolling";
 import { formatDuration } from "../shared/format";
+import { useTheme } from "../shared/theme";
 import type { LiveSummary, StatusPayload } from "../shared/types";
 
 interface Props {
@@ -50,6 +51,7 @@ function statusFromLive(live: LiveSummary): StatusPayload {
 }
 
 export function Overview({ caseId }: Props) {
+  const { clean } = useTheme();
   const { data: live } = useLiveSummary(caseId);
   const { data: summary } = useCommunicationsSummary(caseId);
 
@@ -60,7 +62,7 @@ export function Overview({ caseId }: Props) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 space-y-4 glow-card">
-        <h2 className="text-lg font-bold">📊 Progress</h2>
+        <h2 className="text-lg font-bold">{clean("📊 Progress")}</h2>
         {elapsedMs != null && (
           <p className="text-sm">
             <span className="text-slate-400">Elapsed:</span>{" "}
@@ -78,26 +80,26 @@ export function Overview({ caseId }: Props) {
         {live && (
           <div className="space-y-2 text-sm">
             <p>
-              <span className="text-slate-400 font-semibold">🌷 Phase:</span>{" "}
+              <span className="text-slate-400 font-semibold">{clean("🌷 Phase:")}</span>{" "}
               {live.phase} — {live.phase_name}
             </p>
             <p>
-              <span className="text-slate-400 font-semibold">🧩 Substep:</span>{" "}
+              <span className="text-slate-400 font-semibold">{clean("🧩 Substep:")}</span>{" "}
               {live.substep} — {live.substep_name}
             </p>
-            <p className="text-slate-300">💭 {live.activity}</p>
+            <p className="text-slate-300">{clean("💭")} {live.activity}</p>
             {live.halted && (
-              <p className="text-status-halted font-semibold">😵 Halted: {live.halt_reason}</p>
+              <p className="text-status-halted font-semibold">{clean("😵 Halted:")} {live.halt_reason}</p>
             )}
             {live.workflow_complete != null && (
               <p>
-                <span className="text-slate-400 font-semibold">🎀 Workflow:</span>{" "}
+                <span className="text-slate-400 font-semibold">{clean("🎀 Workflow:")}</span>{" "}
                 {live.workflow_complete ? "complete" : "incomplete"}
               </p>
             )}
             {live.ml_success != null && (
               <p className={live.ml_success ? "text-green-400" : "text-amber-400"}>
-                ML outcome: {live.ml_success ? "success ✨" : "failed 😵"}
+                ML outcome: {live.ml_success ? clean("success ✨") : clean("failed 😵")}
                 {live.ml_deficits && live.ml_deficits.length > 0 && (
                   <span className="text-slate-400">
                     {" "}
@@ -116,7 +118,7 @@ export function Overview({ caseId }: Props) {
       </section>
 
       <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 glow-card">
-        <h2 className="text-lg font-bold mb-4">🪙 Token spend</h2>
+        <h2 className="text-lg font-bold mb-4">{clean("🪙 Token spend")}</h2>
         <TokenChart
           summary={summary}
           tokenSpend={live?.token_spend}
@@ -124,9 +126,9 @@ export function Overview({ caseId }: Props) {
       </section>
 
       <section className="rounded-2xl border border-surface-border bg-surface-raised p-5 lg:col-span-2 glow-card">
-        <h2 className="text-lg font-bold mb-2">💬 Activity</h2>
+        <h2 className="text-lg font-bold mb-2">{clean("💬 Activity")}</h2>
         <p className="text-sm text-slate-400">
-          {live?.activity ?? "Waiting for status… 🕰️"}
+          {live?.activity ?? clean("Waiting for status… 🕰️")}
         </p>
         {live?.in_flight && (
           <p className="text-sm text-yellow-400/90 mt-2">
@@ -137,14 +139,14 @@ export function Overview({ caseId }: Props) {
         )}
         {live?.last_comm && (
           <p className="text-sm text-slate-500 mt-2">
-            🦄 Last LLM turn:{" "}
+            {clean("🦄")} Last LLM turn:{" "}
             <span className="font-mono text-accent-muted">{live.last_comm.id}</span>{" "}
             ({live.last_comm.agent}, {live.last_comm.tokens ?? "?"} tokens)
           </p>
         )}
         {summary && summary.parse_failures > 0 && (
           <p className="text-sm text-status-halted font-semibold mt-2">
-            😬 {summary.parse_failures} parse failure(s) detected
+            {clean("😬")} {summary.parse_failures} parse failure(s) detected
           </p>
         )}
         {isRunning && (

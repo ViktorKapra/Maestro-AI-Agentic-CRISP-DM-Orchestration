@@ -1,29 +1,155 @@
 @import url("https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  min-height: 100vh;
-  font-family: "Quicksand", ui-rounded, system-ui, -apple-system, sans-serif;
-  color: #3b1f47;
-  /* 🌸 soft lavender → rose dreamy gradient */
-  background:
+/* ──────────────────────────────────────────────────────────────
+   🎨 THEMES
+   Tokens are RGB channel triplets (see tailwind.config.js). Two
+   palettes live here and switch via the data-theme attribute on
+   <html>, toggled from the header. :root is the default pink theme.
+   ────────────────────────────────────────────────────────────── */
+
+:root,
+:root[data-theme="pink"] {
+  /* 🌸 Lavender-rose — soft, playful */
+  --surface: 253 244 255; /* #fdf4ff lightest lavender */
+  --surface-raised: 255 255 255; /* #ffffff cards / header */
+  --surface-border: 241 205 233; /* #f1cde9 rose hairline */
+
+  --accent: 214 64 159; /* #d6409f rose-fuchsia */
+  --accent-muted: 147 51 234; /* #9333ea deep lavender */
+
+  --status-running: 217 70 239; /* #d946ef fuchsia */
+  --status-halted: 244 63 94; /* #f43f5e rose-red */
+  --status-complete: 167 139 250; /* #a78bfa soft lavender */
+
+  /* slate remapped to dark-plum-on-light */
+  --slate-100: 59 31 71; /* #3b1f47 body text */
+  --slate-200: 74 42 87; /* #4a2a57 */
+  --slate-300: 93 58 107; /* #5d3a6b code text */
+  --slate-400: 139 111 158; /* #8b6f9e muted labels */
+  --slate-500: 169 143 184; /* #a98fb8 very muted */
+  --slate-600: 201 169 214; /* #c9a9d6 soft borders */
+  --slate-700: 183 148 201; /* #b794c9 */
+  --slate-800: 93 58 107; /* #5d3a6b */
+  --slate-900: 59 31 71; /* #3b1f47 */
+
+  /* decorative */
+  --app-font: "Quicksand", ui-rounded, system-ui, sans-serif;
+  --app-text: #3b1f47;
+  --app-bg:
     radial-gradient(1200px 600px at 10% -10%, #f3e8ff 0%, transparent 60%),
     radial-gradient(1000px 500px at 110% 10%, #ffe4ef 0%, transparent 55%),
     linear-gradient(160deg, #faf0ff 0%, #fff0f6 100%);
+  --ring-glow: 217 70 239; /* pulse-ring color */
+  --scrollbar-track: #fbe9f5;
+  --scrollbar-thumb: #e9a8d6;
+  --scrollbar-thumb-hover: #d6409f;
+  --card-glow: 0 8px 30px -12px rgba(214, 64, 159, 0.35);
+  /* brand gradient (title / active tab / primary buttons) */
+  --brand-from: #d946ef;
+  --brand-via: #ec4899;
+  --brand-to: #a855f7;
+
+  /* Fine diamond carbon mesh (shared definition; only shown when
+     --carbon-opacity > 0, which the business theme sets). Two mirrored sets
+     of steep diagonal lines form elongated diamonds; each line pairs a faint
+     highlight with a dark edge for a subtle bevelled, woven look. Translucent
+     so it tints whatever background sits beneath it. */
+  --carbon-opacity: 0;
+  --carbon-size: 18px 31.5px;
+  --carbon: url("data:image/svg+xml,%3Csvg width='28' height='49' viewBox='0 0 28 49' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* 💻 Nebula — modern, professional dark theme tuned for a
+   data-science / IT / innovation audience: deep slate-navy canvas,
+   cyan→indigo accents, calm and high-contrast. */
+:root[data-theme="biz"] {
+  --surface: 15 23 42; /* #0f172a inputs / code blocks */
+  --surface-raised: 17 24 39; /* #111827 cards / header */
+  --surface-border: 30 41 59; /* #1e293b hairline */
+
+  --accent: 56 189 248; /* #38bdf8 sky/cyan */
+  --accent-muted: 129 140 248; /* #818cf8 indigo links */
+
+  --status-running: 34 211 238; /* #22d3ee cyan = working */
+  --status-halted: 244 63 94; /* #f43f5e red = uh oh */
+  --status-complete: 52 211 153; /* #34d399 emerald = done */
+
+  /* slate as light-on-dark text */
+  --slate-100: 226 232 240; /* #e2e8f0 body text */
+  --slate-200: 203 213 225; /* #cbd5e1 */
+  --slate-300: 203 213 225; /* #cbd5e1 code text */
+  --slate-400: 148 163 184; /* #94a3b8 muted labels */
+  --slate-500: 100 116 139; /* #64748b very muted */
+  --slate-600: 51 65 85; /* #334155 soft borders */
+  --slate-700: 71 85 105; /* #475569 */
+  --slate-800: 203 213 225; /* #cbd5e1 */
+  --slate-900: 241 245 249; /* #f1f5f9 */
+
+  --app-font: "Inter", system-ui, -apple-system, sans-serif;
+  --app-text: #e2e8f0;
+  /* Royal-blue radial glow in the centre fading to black at the edges.
+     The carbon mesh texture is a separate translucent layer (body::before). */
+  --app-bg:
+    radial-gradient(
+      ellipse 80% 75% at 50% 47%,
+      #3c6098 0%,
+      #2f5283 12%,
+      #244064 26%,
+      #182c46 42%,
+      #0d1a2e 58%,
+      #060e1c 74%,
+      #02050d 88%,
+      #000000 100%
+    );
+  --ring-glow: 56 189 248;
+  --scrollbar-track: #0f172a;
+  --scrollbar-thumb: #334155;
+  --scrollbar-thumb-hover: #38bdf8;
+  --card-glow: 0 10px 34px -14px rgba(15, 23, 42, 0.8);
+  --brand-from: #22d3ee;
+  --brand-via: #38bdf8;
+  --brand-to: #6366f1;
+  --carbon-opacity: 0.3;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--app-font);
+  color: var(--app-text);
+  background: var(--app-bg);
   background-attachment: fixed;
+  transition:
+    background 0.4s ease,
+    color 0.4s ease;
+}
+
+/* Carbon-fibre weave overlay — sits above the background gradient but behind
+   all content. Hidden in the pink theme (--carbon-opacity: 0). */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--carbon);
+  background-size: var(--carbon-size);
+  opacity: var(--carbon-opacity);
+  transition: opacity 0.4s ease;
 }
 
 @keyframes pulse-ring {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(217, 70, 239, 0.45);
+    box-shadow: 0 0 0 0 rgba(var(--ring-glow) / 0.45);
   }
   50% {
-    box-shadow: 0 0 0 7px rgba(217, 70, 239, 0);
+    box-shadow: 0 0 0 7px rgba(var(--ring-glow) / 0);
   }
 }
 
@@ -31,25 +157,163 @@ body {
   animation: pulse-ring 2s ease-in-out infinite;
 }
 
-/* 💅 cute pastel scrollbars */
+/* themed scrollbars */
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-track {
-  background: #fbe9f5;
+  background: var(--scrollbar-track);
   border-radius: 999px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #e9a8d6;
+  background: var(--scrollbar-thumb);
   border-radius: 999px;
-  border: 2px solid #fbe9f5;
+  border: 2px solid var(--scrollbar-track);
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #d6409f;
+  background: var(--scrollbar-thumb-hover);
 }
 
-/* ✨ soft pink glow on cards */
+/* soft glow on cards */
 .glow-card {
-  box-shadow: 0 8px 30px -12px rgba(214, 64, 159, 0.35);
+  box-shadow: var(--card-glow);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Brand gradient remap. The title, active tab and primary buttons
+   use hardcoded Tailwind pink gradient stops. Re-point those exact
+   utility classes to the themed brand variables so the brand colour
+   follows the active theme. (Higher specificity → wins over Tailwind.)
+   ────────────────────────────────────────────────────────────── */
+:root .from-fuchsia-500 {
+  --tw-gradient-from: var(--brand-from) var(--tw-gradient-from-position);
+  --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+}
+:root .via-pink-500 {
+  --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops:
+    var(--tw-gradient-from), var(--brand-via) var(--tw-gradient-via-position),
+    var(--tw-gradient-to);
+}
+:root .to-pink-500,
+:root .to-purple-500 {
+  --tw-gradient-to: var(--brand-to) var(--tw-gradient-to-position);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Business-theme palette remap. The reference tabs (State Shape,
+   Loop Logic, Failures, Prompts, Framework, Comms) hardcode pink-
+   family hues to colour-code the CRISP-DM phases. In the Carbon
+   theme those would look out of place, so remap each hue to a cool,
+   professional equivalent — while keeping the phases *distinct*:
+     purple → indigo · fuchsia → cyan · pink → sky · rose → violet
+   ────────────────────────────────────────────────────────────── */
+
+/* ── indigo (from purple) ── */
+:root[data-theme="biz"] .text-purple-300 {
+  color: #a5b4fc;
+}
+:root[data-theme="biz"] .bg-purple-500\/20 {
+  background-color: rgb(99 102 241 / 0.2);
+}
+:root[data-theme="biz"] .bg-purple-900\/10 {
+  background-color: rgb(99 102 241 / 0.08);
+}
+:root[data-theme="biz"] .bg-purple-900\/30 {
+  background-color: rgb(99 102 241 / 0.18);
+}
+:root[data-theme="biz"] .border-purple-500\/40 {
+  border-color: rgb(99 102 241 / 0.4);
+}
+:root[data-theme="biz"] .border-purple-500\/50 {
+  border-color: rgb(99 102 241 / 0.5);
+}
+
+/* ── cyan (from fuchsia) ── */
+:root[data-theme="biz"] .text-fuchsia-300,
+:root[data-theme="biz"] .text-fuchsia-700 {
+  color: #67e8f9;
+}
+:root[data-theme="biz"] .text-fuchsia-400 {
+  color: #22d3ee;
+}
+:root[data-theme="biz"] .bg-fuchsia-100 {
+  background-color: rgb(34 211 238 / 0.15);
+}
+:root[data-theme="biz"] .bg-fuchsia-500\/20 {
+  background-color: rgb(34 211 238 / 0.18);
+}
+:root[data-theme="biz"] .bg-fuchsia-900\/10 {
+  background-color: rgb(34 211 238 / 0.07);
+}
+:root[data-theme="biz"] .bg-fuchsia-900\/30 {
+  background-color: rgb(34 211 238 / 0.16);
+}
+:root[data-theme="biz"] .border-fuchsia-300,
+:root[data-theme="biz"] .border-fuchsia-500\/40 {
+  border-color: rgb(34 211 238 / 0.4);
+}
+:root[data-theme="biz"] .border-fuchsia-500\/30 {
+  border-color: rgb(34 211 238 / 0.3);
+}
+:root[data-theme="biz"] .border-fuchsia-500\/50 {
+  border-color: rgb(34 211 238 / 0.5);
+}
+
+/* ── sky (from pink) ── */
+:root[data-theme="biz"] .text-pink-300,
+:root[data-theme="biz"] .text-pink-300\/80 {
+  color: #7dd3fc;
+}
+:root[data-theme="biz"] .text-pink-400 {
+  color: #38bdf8;
+}
+:root[data-theme="biz"] .text-pink-200\/70 {
+  color: #bae6fd;
+}
+:root[data-theme="biz"] .bg-pink-500\/20 {
+  background-color: rgb(56 189 248 / 0.2);
+}
+:root[data-theme="biz"] .bg-pink-900\/10 {
+  background-color: rgb(56 189 248 / 0.08);
+}
+:root[data-theme="biz"] .bg-pink-900\/30 {
+  background-color: rgb(56 189 248 / 0.18);
+}
+:root[data-theme="biz"] .border-pink-500\/30 {
+  border-color: rgb(56 189 248 / 0.3);
+}
+:root[data-theme="biz"] .border-pink-500\/40 {
+  border-color: rgb(56 189 248 / 0.4);
+}
+:root[data-theme="biz"] .border-pink-500\/50 {
+  border-color: rgb(56 189 248 / 0.5);
+}
+
+/* ── violet (from rose) ── */
+:root[data-theme="biz"] .text-rose-300,
+:root[data-theme="biz"] .text-rose-700 {
+  color: #c4b5fd;
+}
+:root[data-theme="biz"] .bg-rose-100,
+:root[data-theme="biz"] .bg-rose-100\/70 {
+  background-color: rgb(167 139 250 / 0.15);
+}
+:root[data-theme="biz"] .bg-rose-500\/20 {
+  background-color: rgb(167 139 250 / 0.2);
+}
+:root[data-theme="biz"] .bg-rose-900\/10 {
+  background-color: rgb(167 139 250 / 0.08);
+}
+:root[data-theme="biz"] .bg-rose-900\/30 {
+  background-color: rgb(167 139 250 / 0.18);
+}
+:root[data-theme="biz"] .border-rose-300,
+:root[data-theme="biz"] .border-rose-500\/40 {
+  border-color: rgb(167 139 250 / 0.4);
+}
+:root[data-theme="biz"] .border-rose-500\/50 {
+  border-color: rgb(167 139 250 / 0.5);
 }
