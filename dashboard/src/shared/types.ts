@@ -10,6 +10,7 @@ export interface CaseSummary {
   completed_substeps?: number;
   total_substeps?: number;
   model?: string | null;
+  run_count?: number;
 }
 
 export interface RunSummary {
@@ -141,7 +142,37 @@ export interface GraphPayload {
   edges: FlowEdge[];
 }
 
-export type TabId = "overview" | "process" | "state" | "communications" | "architecture" | "timeline" | "knowledge" | "framework" | "prompts" | "state_shape" | "loop_logic" | "failure_modes" | "launch";
+export interface RunResult {
+  run_id: string;
+  llm_model: string;
+  status: string;
+  started_at: string | null;
+  chosen_model: string | null;
+  chosen_params: Record<string, unknown>;
+  modeling_technique: string | null;
+  data_prep: string | null;
+  derived_features: string[];
+  derived_summary: string | null;
+  missing_summary: string | null;
+  problem_type: string | null;
+  score: number | null;
+  cv_score: number | null;
+  holdout_score: number | null;
+  score_metric: string | null;
+  success_threshold: number | null;
+  meets_threshold: boolean | null;
+  metrics: Record<string, number>;
+  confusion_matrix: number[][] | null;
+  class_labels: Record<string, string>;
+  ml_success: boolean | null;
+  workflow_complete: boolean | null;
+  halt_reason: string | null;
+  total_tokens: number | null;
+  insight?: { summary: string; flags: string[] };
+  badges?: string[];
+}
+
+export type TabId = "home" | "overview" | "process" | "inspect" | "results" | "state" | "communications" | "architecture" | "framework" | "prompts" | "state_shape" | "failure_modes" | "launch";
 
 export interface CaseConfig {
   case_id: string;

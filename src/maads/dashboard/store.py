@@ -32,7 +32,14 @@ def list_cases(artifact_root: Path) -> list[dict[str, Any]]:
             payload = json.loads(status_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        cases.append(_case_summary(child.name, run_dir, payload))
+        summary = _case_summary(child.name, run_dir, payload)
+        runs_dir = child / "runs"
+        summary["run_count"] = (
+            sum(1 for p in runs_dir.iterdir() if p.is_dir())
+            if runs_dir.is_dir()
+            else 0
+        )
+        cases.append(summary)
     return cases
 
 

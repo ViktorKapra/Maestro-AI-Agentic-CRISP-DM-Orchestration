@@ -9,6 +9,7 @@ import type {
   ModelCatalog,
   ProcessView,
   RagView,
+  RunResult,
   RunSummary,
   StatusPayload,
   TraceSummary,
@@ -42,6 +43,10 @@ export function fetchCases(): Promise<CaseSummary[]> {
 
 export function fetchCaseRuns(caseId: string): Promise<RunSummary[]> {
   return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/runs`);
+}
+
+export function fetchCaseResults(caseId: string): Promise<RunResult[]> {
+  return fetchJson(`${API}/cases/${encodeURIComponent(caseId)}/results`);
 }
 
 export function fetchLiveSummary(caseId: string, runId?: string | null): Promise<LiveSummary> {

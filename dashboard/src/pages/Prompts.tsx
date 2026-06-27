@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTheme } from "../shared/theme";
 
-const AGENTS = [
+export const AGENTS = [
   {
     id: "pm",
     emoji: "📋",
@@ -157,9 +157,13 @@ Return the raw JSON payload matching the target schema. Do not include markdown 
   },
 ];
 
-export function Prompts() {
+export function Prompts({ initialAgent }: { initialAgent?: string } = {}) {
   const { clean } = useTheme();
-  const [active, setActive] = useState("pm");
+  const [active, setActive] = useState(
+    initialAgent && AGENTS.some((a) => a.id === initialAgent)
+      ? initialAgent
+      : "pm",
+  );
   const agent = AGENTS.find((a) => a.id === active) ?? AGENTS[0];
 
   return (

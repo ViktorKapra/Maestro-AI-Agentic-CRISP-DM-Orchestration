@@ -14,7 +14,8 @@ const EMOJI_RE = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}]/gu;
 
 function getInitialTheme(): ThemeId {
   const saved = localStorage.getItem(STORAGE_KEY);
-  return saved === "biz" || saved === "pink" ? saved : "pink";
+  // Default to the professional Carbon (biz) theme for first-time visitors.
+  return saved === "biz" || saved === "pink" ? saved : "biz";
 }
 
 interface ThemeContextValue {
