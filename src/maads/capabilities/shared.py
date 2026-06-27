@@ -9,11 +9,14 @@ from maads.paths import resolve_path
 from maads.state import CrispDMState
 from maads.tools import inspect_dataset
 
-_PREP_STAGES = (
-    ("integrated", "train_integrated.parquet", "test_integrated.parquet"),
-    ("constructed", "train_constructed.parquet", "test_constructed.parquet"),
+# Prep stages in PRODUCTION order (each reads the previous one's output).
+_PREP_STAGE_FILES = (
     ("clean", "train_clean.parquet", "test_clean.parquet"),
+    ("constructed", "train_constructed.parquet", "test_constructed.parquet"),
+    ("integrated", "train_integrated.parquet", "test_integrated.parquet"),
 )
+# The upstream stage each prep substep reads FROM. None = raw source CSV.
+_PREP_UPSTREAM = {"3.2": None, "3.3": "clean", "3.4": "constructed", "3.5": "integrated"}
 
 
 def abspath(rel: str) -> str:
@@ -36,13 +39,27 @@ def prep_workdir(artifact_dir: Path) -> Path:
     return wd
 
 
-def prep_inputs(artifact_dir: Path, state: CrispDMState) -> tuple[str, str]:
+def prep_inputs(artifact_dir: Path, state: CrispDMState, substep: str = "") -> tuple[str, str]:
+    """Return the (train, test) inputs the given prep substep should read.
+
+    Each substep reads its proper UPSTREAM stage (3.2->raw, 3.3->clean,
+    3.4->constructed, 3.5->integrated), never a downstream artifact — so a revisit
+    of an early step does not pick up a later step's output. When the exact
+    upstream artifact is absent, we walk back to the most-advanced existing stage
+    at-or-before it, falling back to the raw source CSVs.
+    """
     wd = prep_workdir(artifact_dir)
-    for _stage, train_name, test_name in _PREP_STAGES:
+    raw = (abspath(state.config.data.train_csv), abspath(state.config.data.test_csv))
+    upstream = _PREP_UPSTREAM.get(substep, "integrated")  # default = most-advanced
+    if upstream is None:
+        return raw
+    names = [s[0] for s in _PREP_STAGE_FILES]
+    cutoff = names.index(upstream)
+    for _stage, train_name, test_name in reversed(_PREP_STAGE_FILES[: cutoff + 1]):
         train_p, test_p = wd / train_name, wd / test_name
         if train_p.exists() and test_p.exists():
             return str(train_p.resolve()), str(test_p.resolve())
-    return abspath(state.config.data.train_csv), abspath(state.config.data.test_csv)
+    return raw
 
 
 def record_degraded(state: CrispDMState, substep: str, agent: str, reason: str) -> None:
@@ -59,6 +76,31 @@ def de_dataset_context(state: CrispDMState, train: str, test: str) -> dict[str, 
 
 def has_keys(payload: dict, *keys: str) -> list[str]:
     return [f"missing key '{k}'" for k in keys if k not in payload]
+
+
+def target_preserved(payload: dict, target: str, path_key: str = "train_out") -> list[str]:
+    """Contract: the train parquet the code wrote must still contain TARGET.
+
+    Reads the parquet at ``payload[path_key]`` and checks ``target`` is a column.
+    Returns a list of human-readable errors (empty == ok), so it composes with the
+    other contract helpers via list concatenation.
+    """
+    import pandas as pd
+
+    path = payload.get(path_key)
+    if not path:
+        return [f"missing key '{path_key}'"]
+    try:
+        cols = pd.read_parquet(path).columns
+    except Exception as exc:  # noqa: BLE001 - surfaced as corrective feedback, not raised
+        return [f"could not read '{path_key}' ({path}): {exc}"]
+    if target not in cols:
+        return [
+            f"TARGET column '{target}' is missing from {path_key}; it exists only in "
+            f"train and must be preserved — do not drop it during cleaning/construction/"
+            f"integration/schema alignment"
+        ]
+    return []
 
 
 def per_column_map(payload: dict, field: str, *, value_label: str) -> list[str]:

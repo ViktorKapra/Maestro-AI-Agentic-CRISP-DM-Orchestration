@@ -5,12 +5,15 @@ from __future__ import annotations
 import pytest
 
 from maads.crew import build_llm, make_agent, reset_llm_caches, resolve_model_for_agent
+from maads.crew_base import structured_outputs_enabled
 
 
 @pytest.fixture(autouse=True)
 def _clear_llm_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate env and bust lru_cache between tests."""
     for name in (
+        "MAADS_MODEL_OVERRIDE",
+        "MAADS_STRUCTURED_OUTPUTS",
         "MODEL",
         "MODEL_CODE",
         "MODEL_JSON",
@@ -50,6 +53,53 @@ def test_per_agent_override_beats_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MODEL_DEVELOPER", "ollama/qwen2.5-coder:7b")
     assert resolve_model_for_agent("developer") == "ollama/qwen2.5-coder:7b"
     assert resolve_model_for_agent("data_engineer") == "ollama/qwen2.5-coder:14b"
+
+
+def test_model_override_beats_per_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A per-run UI/CLI model choice (MAADS_MODEL_OVERRIDE) wins for every agent."""
+    monkeypatch.setenv("MODEL", "ollama/gemma2:9b")
+    monkeypatch.setenv("MODEL_CODE", "ollama/qwen2.5-coder:14b")
+    monkeypatch.setenv("MODEL_JSON", "ollama/gemma2:9b")
+    monkeypatch.setenv("MODEL_DEVELOPER", "ollama/qwen2.5-coder:7b")
+    monkeypatch.setenv("MAADS_MODEL_OVERRIDE", "gpt-4o")
+    for role in ("pm", "domain", "developer", "data_engineer", "data_scientist", "storyteller"):
+        assert resolve_model_for_agent(role) == "gpt-4o"
+
+
+def test_blank_model_override_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A whitespace override is treated as unset; per-role routing still applies."""
+    monkeypatch.setenv("MODEL", "ollama/gemma2:9b")
+    monkeypatch.setenv("MODEL_CODE", "ollama/qwen2.5-coder:14b")
+    monkeypatch.setenv("MAADS_MODEL_OVERRIDE", "   ")
+    assert resolve_model_for_agent("developer") == "ollama/qwen2.5-coder:14b"
+    assert resolve_model_for_agent("pm") == "ollama/gemma2:9b"
+
+
+def test_openai_code_agents_no_structured_output() -> None:
+    """On OpenAI, code-authoring agents must NOT get json_schema (they emit code)."""
+    assert structured_outputs_enabled("data_engineer", "gpt-5.4") is False
+    assert structured_outputs_enabled("data_scientist", "gpt-5.4") is False
+
+
+def test_openai_json_agents_keep_structured_output() -> None:
+    """On OpenAI, non-code structured agents still get json_schema under auto."""
+    assert structured_outputs_enabled("pm", "gpt-5.4") is True
+    assert structured_outputs_enabled("domain", "gpt-5.4") is True
+    assert structured_outputs_enabled("storyteller", "gpt-5.4") is True
+
+
+def test_openai_force_does_not_override_code_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAADS_STRUCTURED_OUTPUTS", "on")
+    assert structured_outputs_enabled("data_engineer", "gpt-5.4") is False
+    assert structured_outputs_enabled("pm", "gpt-5.4") is True
+
+
+def test_ollama_structured_output_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ollama behaviour is untouched: off under auto, on only when forced."""
+    assert structured_outputs_enabled("data_engineer", "ollama/x") is False
+    monkeypatch.setenv("MAADS_STRUCTURED_OUTPUTS", "on")
+    # The Ollama branch returns before the OpenAI code-agent guard, so force wins.
+    assert structured_outputs_enabled("data_engineer", "ollama/x") is True
 
 
 def test_cloud_openai_tiering_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:

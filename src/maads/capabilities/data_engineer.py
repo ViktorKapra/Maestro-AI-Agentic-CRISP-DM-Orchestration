@@ -17,6 +17,7 @@ from maads.capabilities.shared import (
     prep_workdir as _prep_workdir,
     describe_data_contract as _describe_data_contract,
     measure_prep_artifacts as _measure_prep_artifacts,
+    target_preserved as _target_preserved,
 )
 
 _QUALITY_24_INSTRUCTION = (
@@ -90,7 +91,7 @@ def execution_evidence(
         return {"data_quality_report": res.payload}
 
     prep_wd = str(_prep_workdir(artifact_dir).resolve())
-    train_in, test_in = _prep_inputs(artifact_dir, state)
+    train_in, test_in = _prep_inputs(artifact_dir, state, substep)
 
     if substep == "3.2":
         res = run_authored_code(
@@ -106,7 +107,7 @@ def execution_evidence(
             contract=lambda p: (
                 _has_keys(p, "train_out", "test_out")
                 or _has_keys(p, "missing_before", "missing_after")
-            ),
+            ) + _target_preserved(p, target),
             contract_hint="Required keys: train_out, test_out (paths), missing_before, "
                           "missing_after (per-column int counts).",
             artifact_dir=artifact_dir,
@@ -134,7 +135,8 @@ def execution_evidence(
                 "TRAIN_IN": train_in, "TEST_IN": test_in, "OUTDIR": prep_wd,
                 "TARGET": target, **ds_ctx,
             },
-            contract=lambda p: _has_keys(p, "train_out", "test_out", "derived"),
+            contract=lambda p: _has_keys(p, "train_out", "test_out", "derived")
+            + _target_preserved(p, target),
             contract_hint="Required keys: train_out, test_out (paths), derived (list of names).",
             artifact_dir=artifact_dir,
         )
@@ -156,9 +158,16 @@ def execution_evidence(
             instruction="CRISP-DM 3.4 Integrate Data: read TRAIN_IN and TEST_IN, validate "
                         "schema compatibility and row granularity, write "
                         "train_integrated.parquet and test_integrated.parquet under OUTDIR, "
-                        "and report merged row/column counts.",
-            header_vars={"TRAIN_IN": train_in, "TEST_IN": test_in, "OUTDIR": prep_wd, **ds_ctx},
-            contract=lambda p: _has_keys(p, "train_out", "test_out", "train_rows", "test_rows"),
+                        "and report merged row/column counts. The TARGET column exists only "
+                        "in train (not test) — this is expected; never drop TARGET to make "
+                        "the schemas match. Keep all train columns; only align shared "
+                        "feature columns.",
+            header_vars={
+                "TRAIN_IN": train_in, "TEST_IN": test_in, "OUTDIR": prep_wd,
+                "TARGET": target, **ds_ctx,
+            },
+            contract=lambda p: _has_keys(p, "train_out", "test_out", "train_rows", "test_rows")
+            + _target_preserved(p, target),
             contract_hint="Required keys: train_out, test_out, train_rows, test_rows, "
                           "columns_train, columns_test.",
             artifact_dir=artifact_dir,
@@ -190,7 +199,7 @@ def execution_evidence(
             contract=lambda p: (
                 _has_keys(p, "train", "test", "n_train", "n_test")
                 or ([] if int(p.get("n_train", 0)) > 0 else ["n_train must be > 0"])
-            ),
+            ) + _target_preserved(p, target, path_key="train"),
             contract_hint="Required keys: train (parquet path), test (parquet path), "
                           "n_train (int>0), n_test (int), derived (list), dropped (list).",
             artifact_dir=artifact_dir,

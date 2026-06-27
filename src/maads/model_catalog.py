@@ -13,26 +13,24 @@ from __future__ import annotations
 
 # Ollama Cloud models (run on Ollama's servers; require `ollama signin` or
 # OLLAMA_API_KEY). Use the ``ollama/`` LiteLLM prefix that crew_base expects.
+# Only free-tier tags are listed here — subscription-gated models (glm-5*,
+# deepseek-v4*, kimi-*) return 403 without a paid Ollama plan, so they are
+# omitted. Verified runnable via POST /api/generate on the free tier.
 OLLAMA_CLOUD_MODELS: list[dict[str, str]] = [
     {"id": "ollama/gpt-oss:120b-cloud", "label": "gpt-oss 120b (cloud)"},
     {"id": "ollama/gpt-oss:20b-cloud", "label": "gpt-oss 20b (cloud)"},
     {"id": "ollama/qwen3-coder:480b-cloud", "label": "Qwen3 Coder 480b (cloud)"},
-    {"id": "ollama/deepseek-v4-flash:cloud", "label": "DeepSeek V4 Flash (cloud)"},
-    {"id": "ollama/deepseek-v4-pro:cloud", "label": "DeepSeek V4 Pro (cloud)"},
-    {"id": "ollama/glm-5:cloud", "label": "GLM-5 (cloud)"},
-    {"id": "ollama/glm-5.2:cloud", "label": "GLM-5.2 (cloud)"},
     {"id": "ollama/minimax-m3:cloud", "label": "MiniMax M3 (cloud)"},
-    {"id": "ollama/kimi-k2.7-code:cloud", "label": "Kimi K2.7 Code (cloud)"},
-    {"id": "ollama/qwen3.5:122b-cloud", "label": "Qwen3.5 122b (cloud)"},
 ]
 
-# OpenAI / ChatGPT API models (require OPENAI_API_KEY).
+# OpenAI / ChatGPT API models (require OPENAI_API_KEY). Current as of 2026-06;
+# IDs from https://developers.openai.com/api/docs/models/all
 OPENAI_MODELS: list[dict[str, str]] = [
-    {"id": "gpt-4o", "label": "GPT-4o"},
-    {"id": "gpt-4o-mini", "label": "GPT-4o mini"},
-    {"id": "o4-mini", "label": "o4-mini"},
-    {"id": "gpt-4.1", "label": "GPT-4.1"},
-    {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"},
+    {"id": "gpt-5.5", "label": "GPT-5.5 (flagship)"},
+    {"id": "gpt-5.5-pro", "label": "GPT-5.5 Pro"},
+    {"id": "gpt-5.4", "label": "GPT-5.4"},
+    {"id": "gpt-5.4-mini", "label": "GPT-5.4 mini"},
+    {"id": "gpt-5.4-nano", "label": "GPT-5.4 nano (cheapest)"},
 ]
 
 
