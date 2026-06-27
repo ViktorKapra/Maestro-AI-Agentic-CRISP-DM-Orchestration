@@ -45,6 +45,54 @@ def test_extract_code_handles_fences_and_raw():
     assert _extract_code("   ") is None
 
 
+def test_extract_code_unwraps_json_object():
+    """gpt-class models sometimes return {"code": "...\\n..."} instead of a fence."""
+    raw = '{"code": "import json\\nprint(json.dumps({\\"ok\\": True}))"}'
+    code = _extract_code(raw)
+    assert code == 'import json\nprint(json.dumps({"ok": True}))'
+    compile(code, "<t>", "exec")  # real newlines, not literal \n
+
+
+def test_extract_code_unwraps_json_string():
+    raw = '"import os\\nprint(os.getcwd())"'
+    assert _extract_code(raw) == "import os\nprint(os.getcwd())"
+
+
+def test_extract_code_unwraps_json_inside_fence():
+    raw = '```json\n{"code": "x = 1\\nprint(x)"}\n```'
+    assert _extract_code(raw) == "x = 1\nprint(x)"
+
+
+def test_extract_code_decodes_escaped_newlines_in_fence():
+    """Code escaped inside a fence (literal backslash-n) is decoded if it helps."""
+    raw = "```python\\nimport json\\nprint(1)\\n```"
+    code = _extract_code(raw)
+    assert code is not None
+    assert "\\n" not in code
+    compile(code, "<t>", "exec")
+
+
+def test_extract_code_prefers_normal_python():
+    """A normal, already-compilable snippet is returned untouched (no JSON guess)."""
+    src = "import json\ndata = {'a': 1}\nprint(json.dumps(data))"
+    assert _extract_code(src) == src
+
+
+def test_authored_code_recovers_from_json_wrapped_response(monkeypatch, pyexec, state):
+    """End-to-end: a JSON-wrapped code response still runs and satisfies the contract."""
+    _patch_llm(monkeypatch, [
+        '{"code": "import json\\nprint(json.dumps({\\"n\\": N + 1}))"}',
+    ])
+    res = run_authored_code(
+        pyexec=pyexec, agent_name="data_scientist", state=state,
+        instruction="add one to N",
+        header_vars={"N": 41},
+        contract=lambda p: [] if p.get("n") == 42 else ["wrong n"],
+        max_retries=1,
+    )
+    assert res.ok and res.payload == {"n": 42}
+
+
 def test_authored_code_success(monkeypatch, pyexec, state):
     _patch_llm(monkeypatch, ['```python\nimport json\nprint(json.dumps({"n": N + 1}))\n```'])
     res = run_authored_code(
