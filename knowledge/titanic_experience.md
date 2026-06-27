@@ -2,5 +2,5 @@
 
 - Loops fired: none
 - Degraded steps: none
-- Chosen model: random_forest
-- CV: 0.8103195028560668
+- Chosen model: logistic_regression
+- CV: 0.828253091456908

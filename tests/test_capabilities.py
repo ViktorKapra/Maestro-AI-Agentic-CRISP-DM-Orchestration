@@ -3,12 +3,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import maads.crew as crew
 from maads.capabilities.data_engineer import execution_evidence
 from maads.capabilities.data_scientist import execution_evidence as ds_execution_evidence
-from maads.capabilities.shared import has_keys, de_dataset_context
+from maads.capabilities.shared import (
+    abspath,
+    de_dataset_context,
+    has_keys,
+    prep_inputs,
+    prep_workdir,
+    target_preserved,
+)
 from maads.config import load_case_config
 from maads.paths import resolve_path
 from maads.state import CrispDMState
@@ -47,3 +55,115 @@ def test_ds_execution_evidence_explore_with_stub_code(monkeypatch, state, tmp_pa
     pyexec = PythonExec(workdir=tmp_path / "sandbox")
     out = ds_execution_evidence(pyexec, state, "2.3", tmp_path)
     assert "data_exploration_report" in out
+
+
+# --- prep_inputs stage routing ------------------------------------------------
+
+def _write_stage(wd: Path, stage: str) -> None:
+    frame = pd.DataFrame({"x": [1, 2]})
+    frame.to_parquet(wd / f"train_{stage}.parquet")
+    frame.to_parquet(wd / f"test_{stage}.parquet")
+
+
+def test_prep_inputs_routes_to_correct_upstream(state, tmp_path):
+    wd = prep_workdir(tmp_path)
+    for stage in ("clean", "constructed", "integrated"):
+        _write_stage(wd, stage)
+    raw = (abspath(state.config.data.train_csv), abspath(state.config.data.test_csv))
+
+    assert prep_inputs(tmp_path, state, "3.2") == raw  # Clean reads raw
+    assert prep_inputs(tmp_path, state, "3.3") == (
+        str((wd / "train_clean.parquet").resolve()),
+        str((wd / "test_clean.parquet").resolve()),
+    )
+    assert prep_inputs(tmp_path, state, "3.4") == (
+        str((wd / "train_constructed.parquet").resolve()),
+        str((wd / "test_constructed.parquet").resolve()),
+    )
+    assert prep_inputs(tmp_path, state, "3.5") == (
+        str((wd / "train_integrated.parquet").resolve()),
+        str((wd / "test_integrated.parquet").resolve()),
+    )
+
+
+def test_prep_inputs_falls_back_to_earlier_stage(state, tmp_path):
+    wd = prep_workdir(tmp_path)
+    _write_stage(wd, "clean")  # only the clean stage exists
+    clean = (
+        str((wd / "train_clean.parquet").resolve()),
+        str((wd / "test_clean.parquet").resolve()),
+    )
+
+    # 3.4 wants 'constructed', 3.5 wants 'integrated' — both walk back to 'clean'.
+    assert prep_inputs(tmp_path, state, "3.4") == clean
+    assert prep_inputs(tmp_path, state, "3.5") == clean
+
+
+def test_prep_inputs_empty_workdir_reads_raw(state, tmp_path):
+    # Locks the assumption test_de_prep_reports_measured_from_parquet_not_llm relies
+    # on: with no prep artifacts, even 3.5 falls all the way back to the raw CSVs.
+    prep_workdir(tmp_path)
+    raw = (abspath(state.config.data.train_csv), abspath(state.config.data.test_csv))
+    assert prep_inputs(tmp_path, state, "3.5") == raw
+    assert prep_inputs(tmp_path, state, "3.2") == raw
+
+
+# --- target_preserved contract helper ----------------------------------------
+
+def test_target_preserved_detects_drop(tmp_path):
+    kept = tmp_path / "kept.parquet"
+    dropped = tmp_path / "dropped.parquet"
+    pd.DataFrame({"Survived": [0, 1], "Age": [22, 38]}).to_parquet(kept)
+    pd.DataFrame({"Age": [22, 38]}).to_parquet(dropped)
+
+    assert target_preserved({"train_out": str(kept)}, "Survived") == []
+    assert target_preserved({"train_out": str(dropped)}, "Survived")  # non-empty
+    assert target_preserved({}, "Survived") == ["missing key 'train_out'"]
+
+
+# --- end-to-end: 3.4 Integrate must preserve the target -----------------------
+
+def test_integrate_preserves_target(monkeypatch, state, tmp_path):
+    monkeypatch.setattr(crew, "run_text_task", fake_run_text_task)
+    pyexec = PythonExec(workdir=tmp_path / "sandbox")
+    for sub in ("3.2", "3.3", "3.4"):
+        state.substep = sub
+        execution_evidence(pyexec, state, sub, tmp_path)
+    integrated = prep_workdir(tmp_path) / "train_integrated.parquet"
+    cols = pd.read_parquet(integrated).columns
+    assert state.config.target_column in cols
+
+
+def test_contract_fails_when_target_dropped(monkeypatch, state, tmp_path):
+    """A 3.4 author that drops the target must never satisfy the contract.
+
+    Locks the B1 wiring: the target check is unconditional, so an otherwise
+    well-formed integrate (all keys present, valid JSON) still fails when the
+    written parquet lost the target, exhausts retries + DEBUG, and halts.
+    """
+    drop_target = '''```python
+import pandas as pd, json, os
+def read_table(path):
+    return pd.read_parquet(path) if str(path).endswith(".parquet") else pd.read_csv(path)
+os.makedirs(OUTDIR, exist_ok=True)
+tr = read_table(TRAIN_IN); te = read_table(TEST_IN)
+shared = [c for c in tr.columns if c in te.columns]  # drops train-only TARGET
+tr = tr[shared]
+tp = os.path.join(OUTDIR, "train_integrated.parquet")
+sp = os.path.join(OUTDIR, "test_integrated.parquet")
+tr.to_parquet(tp); te.to_parquet(sp)
+print(json.dumps({"train_out": tp, "test_out": sp,
+                  "train_rows": int(len(tr)), "test_rows": int(len(te)),
+                  "columns_train": list(tr.columns), "columns_test": list(te.columns)}))
+```'''
+
+    def fake(agent_name, instruction, st, **kwargs):
+        if agent_name == "data_engineer" and st.substep == "3.4":
+            return drop_target
+        return ""  # developer DEBUG gets no usable fix -> stays STUCK
+
+    monkeypatch.setattr(crew, "run_text_task", fake)
+    state.substep = "3.4"
+    pyexec = PythonExec(workdir=tmp_path / "sandbox")
+    with pytest.raises(crew.CrewKickoffError):
+        execution_evidence(pyexec, state, "3.4", tmp_path)
