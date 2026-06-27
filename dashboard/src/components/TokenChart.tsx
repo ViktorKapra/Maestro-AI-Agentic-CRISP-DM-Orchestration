@@ -50,6 +50,7 @@ const CHART_THEME = {
     axis: "#a98fb8",
     tooltipBg: "#ffffff",
     tooltipBorder: "#f1cde9",
+    tooltipText: "#3b1f47",
     line: "#d6409f",
   },
   biz: {
@@ -58,6 +59,7 @@ const CHART_THEME = {
     axis: "#64748b",
     tooltipBg: "#0f172a",
     tooltipBorder: "#1e293b",
+    tooltipText: "#e2e8f0",
     line: "#38bdf8",
   },
 };
@@ -140,6 +142,8 @@ export function TokenChart({ summary, communications, tokenSpend }: Props) {
                   border: `1px solid ${c.tooltipBorder}`,
                   borderRadius: 8,
                 }}
+                labelStyle={{ color: c.tooltipText, fontWeight: 600 }}
+                itemStyle={{ color: c.tooltipText }}
               />
               <Bar dataKey="tokens" radius={[0, 4, 4, 0]} />
             </BarChart>
@@ -163,6 +167,8 @@ export function TokenChart({ summary, communications, tokenSpend }: Props) {
                   border: `1px solid ${c.tooltipBorder}`,
                   borderRadius: 8,
                 }}
+                labelStyle={{ color: c.tooltipText, fontWeight: 600 }}
+                itemStyle={{ color: c.tooltipText }}
               />
               <Line
                 type="monotone"

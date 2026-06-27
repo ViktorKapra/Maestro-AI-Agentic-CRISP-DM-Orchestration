@@ -38,14 +38,91 @@ class CodeResult:
         return not self.degraded
 
 
+_FENCE_RE = re.compile(r"```(?:[a-zA-Z0-9_+\-]+)?[ \t]*\r?\n?(.*?)```", re.DOTALL)
+
+
+def _strip_fence(text: str) -> str:
+    """Return the contents of the first ```python fence, or the text unchanged."""
+    m = _FENCE_RE.search(text)
+    return m.group(1).strip() if m else text.strip()
+
+
+def _compiles(src: str) -> bool:
+    try:
+        compile(src, "<authored>", "exec")
+        return True
+    except (SyntaxError, ValueError):
+        return False
+
+
+def _unwrap_json_code(text: str) -> str | None:
+    """If `text` is JSON the model wrapped the code in, return the Python.
+
+    gpt-class models occasionally return ``{"code": "import ...\\n..."}`` or a
+    bare JSON-escaped string instead of a code block. Returns None when `text`
+    is not such a wrapper, so callers can fall through to the raw text.
+    """
+    stripped = text.strip()
+    if not stripped or stripped[0] not in '{["':
+        return None
+    try:
+        obj = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if isinstance(obj, str):
+        code = obj
+    elif isinstance(obj, dict):
+        code = next(
+            (
+                obj[key]
+                for key in ("code", "python", "source", "script", "content")
+                if isinstance(obj.get(key), str) and obj[key].strip()
+            ),
+            None,
+        )
+        if code is None:
+            return None
+    else:
+        return None
+    return _strip_fence(code) or None
+
+
 def _extract_code(text: str) -> str | None:
-    """Pull a Python block out of LLM output (fenced ``` or raw)."""
+    """Pull runnable Python out of LLM output, tolerating several shapes.
+
+    Order: strip a ```python fence, then prefer the candidate as-is if it already
+    compiles; otherwise try to unwrap JSON-wrapped code (``{"code": "..."}`` or a
+    JSON string), and finally decode literal ``\\n`` escapes — each only when it
+    yields compilable Python. Falls back to the raw text so a genuinely broken
+    response still surfaces as a normal exec failure for Developer DEBUG.
+    """
     if not text or not text.strip():
         return None
-    m = re.search(r"```(?:python|py)?\s*(.*?)```", text, re.DOTALL)
-    if m:
-        return m.group(1).strip() or None
-    return text.strip()
+    candidate = _strip_fence(text)
+    if not candidate:
+        return None
+
+    # 1. Normal: already valid Python (but not a JSON object masquerading as a
+    #    dict literal — those compile yet aren't the intended code).
+    if candidate[0] not in '{["' and _compiles(candidate):
+        return candidate
+
+    # 2. Model wrapped the code in JSON ({"code": ...} or a JSON string).
+    unwrapped = _unwrap_json_code(candidate)
+    if unwrapped is not None:
+        return unwrapped
+
+    # 3. Code arrived with literal \n escapes (e.g. escaped inside a fence) and
+    #    won't compile — decode the escapes if that produces valid Python.
+    if "\\n" in candidate and not _compiles(candidate):
+        try:
+            decoded = candidate.encode("utf-8").decode("unicode_escape")
+        except (UnicodeDecodeError, ValueError):
+            decoded = candidate
+        if _compiles(decoded):
+            return decoded
+
+    return candidate
 
 
 def _header(header_vars: dict[str, Any]) -> str:

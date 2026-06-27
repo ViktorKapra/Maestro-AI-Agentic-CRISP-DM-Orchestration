@@ -152,9 +152,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     os.chdir(repo_root())
     # Set MODEL before the embedding probe and manifest write so both see the
     # UI/CLI-selected model. load_dotenv ran earlier with override=False, so it
-    # will not clobber this.
-    if getattr(args, "model", None):
-        os.environ["MODEL"] = args.model
+    # will not clobber this. MAADS_MODEL_OVERRIDE makes the chosen model
+    # authoritative for every agent, beating any per-role MODEL_* in .env.
+    model_arg = (getattr(args, "model", None) or "").strip()
+    if model_arg:
+        os.environ["MODEL"] = model_arg
+        os.environ["MAADS_MODEL_OVERRIDE"] = model_arg
     embed_warn = ensure_embedding_model_available()
     if embed_warn:
         print(f"WARNING: {embed_warn}", file=sys.stderr)

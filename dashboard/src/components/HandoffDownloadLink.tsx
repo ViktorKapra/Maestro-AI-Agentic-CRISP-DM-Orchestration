@@ -17,18 +17,20 @@ export function HandoffDownloadLink({ caseId, show, className = "" }: Props) {
   }`;
 
   return (
-    <p className={`text-xs text-slate-500 ${className}`.trim()}>
+    <div className={className}>
       <a
         href={href}
-        className="text-accent hover:underline"
-        download="handoff_standard.zip"
+        download
+        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:scale-[1.03] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-accent/50"
       >
-        Download handoff_standard.zip
+        <span aria-hidden className="text-base leading-none">
+          ↓
+        </span>
+        Download Handoff Package
       </a>
-      <span className="text-slate-600">
-        {" "}
-        — portable bundle for external DS (data, reports, notebook)
-      </span>
-    </p>
+      <p className="text-xs text-slate-500 mt-2">
+        Portable bundle for an external data scientist — data, reports &amp; notebook.
+      </p>
+    </div>
   );
 }

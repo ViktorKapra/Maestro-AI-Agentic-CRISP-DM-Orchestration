@@ -6,6 +6,18 @@ from collections.abc import Callable
 from pathlib import Path
 
 
+def run_meta_md(
+    case_id: str | None, model: str | None, run_id: str | None,
+) -> str:
+    """A one-line metadata banner placed at the top of each report so it's
+    clear which dataset and LLM model produced it."""
+    return (
+        f"> **Dataset:** `{case_id or '?'}`  ·  "
+        f"**LLM model:** `{model or 'default (.env)'}`  ·  "
+        f"**Run ID:** `{run_id or '?'}`\n\n"
+    )
+
+
 def resolve_artifact_path(path: str | Path | None, run_dir: Path) -> Path | None:
     if not path:
         return None
