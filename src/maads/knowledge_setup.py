@@ -107,7 +107,11 @@ def append_experience_to_knowledge(case_id: str, experience: str) -> Path | None
     knowledge_dir = _REPO_ROOT / "knowledge"
     knowledge_dir.mkdir(parents=True, exist_ok=True)
     out = knowledge_dir / f"{case_id}_experience.md"
-    out.write_text(experience.strip() + "\n", encoding="utf-8")
+    # Atomic write so concurrent same-case runs never leave a partial file
+    # (last writer wins, which is fine — this doc accumulates for future runs).
+    tmp = out.with_suffix(f".md.{os.getpid()}.tmp")
+    tmp.write_text(experience.strip() + "\n", encoding="utf-8")
+    os.replace(tmp, out)
     domain_knowledge_sources.cache_clear()
     from maads.rag import clear_rag_cache
 

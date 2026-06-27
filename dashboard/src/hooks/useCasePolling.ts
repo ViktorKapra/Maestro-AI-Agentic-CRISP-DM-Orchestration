@@ -1,16 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  fetchCaseRuns,
   fetchCases,
   fetchCommunications,
   fetchCommunicationsSummary,
   fetchGraph,
   fetchLiveSummary,
+  fetchModels,
   fetchProcess,
   fetchRag,
   fetchState,
   fetchStatus,
   fetchTraceSummary,
 } from "../shared/api";
+import { useSelectedRun } from "../shared/selectedRun";
 
 const POLL_MS = 2000;
 
@@ -27,28 +30,40 @@ export function useCases() {
   });
 }
 
-export function useLiveSummary(caseId: string | null) {
+export function useCaseRuns(caseId: string | null) {
   return useQuery({
-    queryKey: ["liveSummary", caseId],
-    queryFn: () => fetchLiveSummary(caseId!),
+    queryKey: ["caseRuns", caseId],
+    queryFn: () => fetchCaseRuns(caseId!),
+    enabled: !!caseId,
+    ...pollOptions,
+  });
+}
+
+export function useLiveSummary(caseId: string | null) {
+  const { runId } = useSelectedRun();
+  return useQuery({
+    queryKey: ["liveSummary", caseId, runId],
+    queryFn: () => fetchLiveSummary(caseId!, runId),
     enabled: !!caseId,
     ...pollOptions,
   });
 }
 
 export function useStatus(caseId: string | null) {
+  const { runId } = useSelectedRun();
   return useQuery({
-    queryKey: ["status", caseId],
-    queryFn: () => fetchStatus(caseId!),
+    queryKey: ["status", caseId, runId],
+    queryFn: () => fetchStatus(caseId!, runId),
     enabled: !!caseId,
     ...pollOptions,
   });
 }
 
 export function useTraceSummary(caseId: string | null) {
+  const { runId } = useSelectedRun();
   return useQuery({
-    queryKey: ["traceSummary", caseId],
-    queryFn: () => fetchTraceSummary(caseId!),
+    queryKey: ["traceSummary", caseId, runId],
+    queryFn: () => fetchTraceSummary(caseId!, runId),
     enabled: !!caseId,
     ...pollOptions,
   });
@@ -58,55 +73,68 @@ export function useCommunications(
   caseId: string | null,
   opts?: { sinceId?: string; limit?: number },
 ) {
+  const { runId } = useSelectedRun();
   return useQuery({
-    queryKey: ["communications", caseId, opts?.sinceId, opts?.limit],
-    queryFn: () => fetchCommunications(caseId!, opts),
+    queryKey: ["communications", caseId, runId, opts?.sinceId, opts?.limit],
+    queryFn: () => fetchCommunications(caseId!, opts, runId),
     enabled: !!caseId,
     ...pollOptions,
   });
 }
 
 export function useCommunicationsSummary(caseId: string | null) {
+  const { runId } = useSelectedRun();
   return useQuery({
-    queryKey: ["communicationsSummary", caseId],
-    queryFn: () => fetchCommunicationsSummary(caseId!),
+    queryKey: ["communicationsSummary", caseId, runId],
+    queryFn: () => fetchCommunicationsSummary(caseId!, runId),
     enabled: !!caseId,
     ...pollOptions,
   });
 }
 
 export function useGraph(caseId: string | null) {
+  const { runId } = useSelectedRun();
   return useQuery({
-    queryKey: ["graph", caseId],
-    queryFn: () => fetchGraph(caseId!),
+    queryKey: ["graph", caseId, runId],
+    queryFn: () => fetchGraph(caseId!, runId),
     enabled: !!caseId,
     ...pollOptions,
   });
 }
 
 export function useProcess(caseId: string | null) {
+  const { runId } = useSelectedRun();
   return useQuery({
-    queryKey: ["process", caseId],
-    queryFn: () => fetchProcess(caseId!),
+    queryKey: ["process", caseId, runId],
+    queryFn: () => fetchProcess(caseId!, runId),
     enabled: !!caseId,
     ...pollOptions,
   });
 }
 
 export function useCrispDMState(caseId: string | null) {
+  const { runId } = useSelectedRun();
   return useQuery({
-    queryKey: ["crispdmState", caseId],
-    queryFn: () => fetchState(caseId!),
+    queryKey: ["crispdmState", caseId, runId],
+    queryFn: () => fetchState(caseId!, runId),
     enabled: !!caseId,
     ...pollOptions,
   });
 }
 
 export function useRag(caseId: string | null) {
+  const { runId } = useSelectedRun();
   return useQuery({
-    queryKey: ["rag", caseId],
-    queryFn: () => fetchRag(caseId!),
+    queryKey: ["rag", caseId, runId],
+    queryFn: () => fetchRag(caseId!, runId),
     enabled: !!caseId,
     ...pollOptions,
+  });
+}
+
+export function useModels() {
+  return useQuery({
+    queryKey: ["models"],
+    queryFn: fetchModels,
   });
 }

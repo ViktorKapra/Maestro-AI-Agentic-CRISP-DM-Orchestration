@@ -9,6 +9,26 @@ export interface CaseSummary {
   phase_name?: string;
   completed_substeps?: number;
   total_substeps?: number;
+  model?: string | null;
+}
+
+export interface RunSummary {
+  run_id: string;
+  artifact_dir?: string;
+  model?: string | null;
+  status: RunStatus;
+  started_at?: string | null;
+  ended_at?: string | null;
+}
+
+export interface ModelOption {
+  id: string;
+  label: string;
+}
+
+export interface ModelCatalog {
+  ollama_cloud: ModelOption[];
+  openai: ModelOption[];
 }
 
 export interface StatusPayload {

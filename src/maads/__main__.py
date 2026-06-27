@@ -58,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
                             "are kept under artifacts/<case_id>/archive/.")
     p_run.add_argument("--quiet", "-q", action="store_true",
                        help="Disable live progress output (also MAADS_PROGRESS=0).")
+    p_run.add_argument("--model", default=None,
+                       help="Override the MODEL env for this run "
+                            "(e.g. ollama/gpt-oss:120b-cloud, gpt-4o). "
+                            "Recorded in the run manifest.")
 
     # ── data ───────────────────────────────────────────────────────────
     p_data = sub.add_parser("data", help="Data utilities.")
@@ -143,6 +147,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     import os
 
     os.chdir(repo_root())
+    # Set MODEL before the embedding probe and manifest write so both see the
+    # UI/CLI-selected model. load_dotenv ran earlier with override=False, so it
+    # will not clobber this.
+    if getattr(args, "model", None):
+        os.environ["MODEL"] = args.model
     embed_warn = ensure_embedding_model_available()
     if embed_warn:
         print(f"WARNING: {embed_warn}", file=sys.stderr)
@@ -164,12 +173,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     case_dir = case_root(resolve_path(args.artifact_dir), config.case_id)
     run_id = str(uuid.uuid4())
     artifact_dir = prepare_run_dir(case_dir, run_id)
-    ensure_run_layout(artifact_dir, run_id=run_id, case_id=config.case_id)
+    ensure_run_layout(artifact_dir, run_id=run_id, case_id=config.case_id,
+                      model=os.environ.get("MODEL"))
 
-    os.environ.setdefault(
-        "CREWAI_STORAGE_DIR",
-        str((artifact_dir / "crewai_storage").resolve()),
-    )
+    # Unconditional per-run assignment: concurrent runs of the same case must not
+    # share one CrewAI store, so do not honour an inherited CREWAI_STORAGE_DIR.
+    os.environ["CREWAI_STORAGE_DIR"] = str((artifact_dir / "crewai_storage").resolve())
 
     inputs = kickoff_inputs(config)
     (artifact_dir / "kickoff_inputs.json").write_text(
