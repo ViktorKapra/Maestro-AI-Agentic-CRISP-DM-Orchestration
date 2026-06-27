@@ -14,7 +14,7 @@ from maads.success_criterion import criterion_direction
 
 from maads.reports.case_report import build_case_report, render_case_report_md
 from maads.reports.execution_analysis import render_execution_analysis_md
-from maads.reports.md_paths import handoff_remap_factory
+from maads.reports.md_paths import handoff_remap_factory, run_meta_md
 from maads.reports.workbook import (
     _canonical_pipeline_code,
     _canonical_pipeline_markdown,
@@ -68,10 +68,21 @@ def build_case_config_meta(state: CrispDMState) -> dict[str, Any]:
     }
 
 
-def build_run_summary(analysis: dict[str, Any], *, run_id: str) -> dict[str, Any]:
+def _run_model(paths: RunPaths) -> str | None:
+    """The LLM model this run was launched with (from the run manifest)."""
+    try:
+        return json.loads(paths.manifest.read_text(encoding="utf-8")).get("model")
+    except Exception:
+        return None
+
+
+def build_run_summary(
+    analysis: dict[str, Any], *, run_id: str, model: str | None = None,
+) -> dict[str, Any]:
     return {
         "run_id": run_id,
         "case_id": analysis.get("case_id"),
+        "llm_model": model or "default (.env)",
         "workflow_complete": analysis.get("workflow_complete"),
         "ml_success": analysis.get("ml_success"),
         "halt_reason": analysis.get("halt_reason"),
@@ -82,9 +93,17 @@ def build_run_summary(analysis: dict[str, Any], *, run_id: str) -> dict[str, Any
     }
 
 
-def render_handoff_readme(state: CrispDMState, *, run_id: str) -> str:
+def render_handoff_readme(
+    state: CrispDMState, *, run_id: str, model: str | None = None,
+) -> str:
     cfg = state.config
     return f"""# {cfg.case_id} — MAADS Standard Handoff
+
+| | |
+|---|---|
+| **Dataset** | `{cfg.case_id}` |
+| **LLM model** | `{model or "default (.env)"}` |
+| **Run ID** | `{run_id}` |
 
 Portable bundle for continuing this case **without** the MAADS repository.
 
@@ -123,8 +142,6 @@ Run the cells in **Part A — Start here** first.
 
 - The MAADS repo, `pyproject.toml`, or API keys
 - Re-running the full agent pipeline (appendix is reference only)
-
-Run ID: `{run_id}`
 """
 
 
@@ -293,12 +310,15 @@ def build_handoff_zip(
     analysis = context["analysis"]
     cfg = state.config
     run_id = paths.run_dir.name
+    model = _run_model(paths)
     root = f"{cfg.case_id}_handoff"
 
+    meta_md = run_meta_md(cfg.case_id, model, run_id)
     case_meta = build_case_config_meta(state)
     case_meta["run_id"] = run_id
-    run_summary = build_run_summary(analysis, run_id=run_id)
-    readme = render_handoff_readme(state, run_id=run_id)
+    case_meta["llm_model"] = model or "default (.env)"
+    run_summary = build_run_summary(analysis, run_id=run_id, model=model)
+    readme = render_handoff_readme(state, run_id=run_id, model=model)
     notebook = render_bundle_workbook_ipynb(context, state, paths)
 
     buf = io.BytesIO()
@@ -353,7 +373,8 @@ def build_handoff_zip(
         case_report = build_case_report(state)
         zf.writestr(
             f"{root}/reports/case_report.md",
-            render_case_report_md(
+            meta_md
+            + render_case_report_md(
                 case_report,
                 md_dir=handoff_reports,
                 run_dir=paths.run_dir,
@@ -362,7 +383,8 @@ def build_handoff_zip(
         )
         zf.writestr(
             f"{root}/reports/execution_analysis.md",
-            render_execution_analysis_md(
+            meta_md
+            + render_execution_analysis_md(
                 analysis,
                 md_dir=handoff_reports,
                 run_dir=paths.run_dir,
@@ -380,7 +402,8 @@ def build_handoff_zip(
             story_spec = build_story_spec_from_bundle(state)
         zf.writestr(
             f"{root}/reports/final_report.md",
-            render_final_report_md(
+            meta_md
+            + render_final_report_md(
                 state,
                 story_spec,
                 md_dir=handoff_reports,

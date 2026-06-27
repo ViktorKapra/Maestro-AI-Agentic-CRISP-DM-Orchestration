@@ -120,29 +120,36 @@ export function FlowCanvas({ graph, onOpenPrompt }: Props) {
     [graph],
   );
 
-  const edges: Edge[] = useMemo(
-    () =>
-      (graph?.edges ?? []).map((e) => {
-        const isDispatch = e.edgeType === "dispatch";
-        const stroke = isDispatch ? ct.edgeDispatch : ct.edge;
-        return {
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          type: isDispatch ? "smoothstep" : "default",
-          animated: e.animated,
-          style: {
-            stroke,
-            strokeWidth: e.animated ? 2.5 : isDispatch ? 2 : 1.5,
-          },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: e.animated ? ct.edge : stroke,
-          },
-        };
-      }),
-    [graph, ct],
-  );
+  const edges: Edge[] = useMemo(() => {
+    const backend: Edge[] = (graph?.edges ?? []).map((e) => {
+      const isDispatch = e.edgeType === "dispatch";
+      const stroke = isDispatch ? ct.edgeDispatch : ct.edge;
+      return {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: isDispatch ? "smoothstep" : "default",
+        // animate every edge so there's always visible movement / flow
+        animated: true,
+        style: {
+          stroke,
+          strokeWidth: e.animated ? 2.5 : isDispatch ? 2 : 1.5,
+        },
+        // Service calls are two-way (request + response) → arrows on both ends.
+        // Dispatch from the orchestrator is one-way (it hands out work) →
+        // a single arrow pointing to the agent.
+        markerStart: isDispatch
+          ? undefined
+          : { type: MarkerType.ArrowClosed, color: e.animated ? ct.edge : stroke },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: e.animated ? ct.edge : stroke,
+        },
+      };
+    });
+
+    return backend;
+  }, [graph, ct]);
 
   if (!graph || nodes.length === 0) {
     return (

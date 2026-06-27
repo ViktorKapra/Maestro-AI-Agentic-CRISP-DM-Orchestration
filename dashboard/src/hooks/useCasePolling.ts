@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  fetchCaseResults,
   fetchCaseRuns,
   fetchCases,
   fetchCommunications,
@@ -34,6 +35,15 @@ export function useCaseRuns(caseId: string | null) {
   return useQuery({
     queryKey: ["caseRuns", caseId],
     queryFn: () => fetchCaseRuns(caseId!),
+    enabled: !!caseId,
+    ...pollOptions,
+  });
+}
+
+export function useCaseResults(caseId: string | null) {
+  return useQuery({
+    queryKey: ["caseResults", caseId],
+    queryFn: () => fetchCaseResults(caseId!),
     enabled: !!caseId,
     ...pollOptions,
   });

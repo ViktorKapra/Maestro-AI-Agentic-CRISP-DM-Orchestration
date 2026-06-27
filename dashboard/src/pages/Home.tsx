@@ -4,7 +4,8 @@ import { useTheme } from "../shared/theme";
 interface Props {
   onLaunch: () => void;
   onExplore: () => void;
-  caseCount?: number;
+  datasetCount?: number;
+  experimentCount?: number;
 }
 
 // Counts up from 0 to `target` once on mount; jumps straight to the value when
@@ -50,7 +51,12 @@ function Kpi({ value, label }: { value: number | string; label: string }) {
   );
 }
 
-export function Home({ onLaunch, onExplore, caseCount }: Props) {
+export function Home({
+  onLaunch,
+  onExplore,
+  datasetCount,
+  experimentCount,
+}: Props) {
   const { clean } = useTheme();
 
   return (
@@ -87,9 +93,14 @@ export function Home({ onLaunch, onExplore, caseCount }: Props) {
           style={{ animationDelay: "220ms" }}
         >
           Six specialized AI agents take a dataset through the entire CRISP-DM
-          lifecycle — business understanding, modeling, evaluation, and a
-          polished, ready-to-ship handoff. You set the goal; the agents do the
-          rest.
+          lifecycle — from business understanding and modeling to evaluation and
+          a polished, ready-to-ship handoff.
+        </p>
+        <p
+          className="reveal mt-3 max-w-2xl text-lg font-medium text-slate-300"
+          style={{ animationDelay: "300ms" }}
+        >
+          You set the goal. The agents do the rest.
         </p>
 
         <div
@@ -109,8 +120,10 @@ export function Home({ onLaunch, onExplore, caseCount }: Props) {
           <button
             type="button"
             onClick={onExplore}
-            disabled={!caseCount}
-            title={!caseCount ? "No experiments yet — launch one first" : undefined}
+            disabled={!experimentCount}
+            title={
+              !experimentCount ? "No experiments yet — launch one first" : undefined
+            }
             className="inline-flex items-center rounded-xl border border-surface-border bg-surface/50 px-6 py-3 text-sm font-semibold text-slate-100 backdrop-blur transition-all hover:bg-surface-border focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-surface/50"
           >
             Explore a Run
@@ -122,13 +135,11 @@ export function Home({ onLaunch, onExplore, caseCount }: Props) {
         className="reveal relative max-w-5xl mx-auto mt-16 border-t border-surface-border/60 pt-8"
         style={{ animationDelay: "460ms" }}
       >
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
+          <Kpi value={datasetCount ?? "—"} label="Datasets tested" />
           <Kpi value={6} label="Specialized AI agents" />
-          <Kpi value={24} label="CRISP-DM substeps automated" />
-          <Kpi
-            value={caseCount ?? "—"}
-            label="Experiments in this workspace"
-          />
+          <Kpi value={experimentCount ?? "—"} label="Experiments run" />
+          <Kpi value={24} label="CRISP-DM substeps" />
         </div>
       </section>
     </div>

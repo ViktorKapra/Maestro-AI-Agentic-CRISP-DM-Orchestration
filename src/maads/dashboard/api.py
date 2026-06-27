@@ -1,6 +1,8 @@
 """FastAPI routes for the trace monitoring dashboard."""
 from __future__ import annotations
 
+import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -46,6 +48,149 @@ def get_case_runs(case_id: str) -> list[dict[str, Any]]:
     if not case_path.is_dir():
         raise HTTPException(status_code=404, detail=f"Case not found: {case_id}")
     return store.list_runs(case_path)
+
+
+@router.get("/cases/{case_id}/results")
+def get_case_results(case_id: str) -> list[dict[str, Any]]:
+    """One comparison row per run of a case: which LLM, which ML model, the
+    data-prep approach and the outcome — for comparing models side by side."""
+    from maads.outcome import ml_run_succeeded, workflow_complete
+    from maads.state import CrispDMState
+    from maads.success_criterion import criterion_direction, score_meets_threshold
+
+    case_path = _artifact_root() / case_id
+    if not case_path.is_dir():
+        raise HTTPException(status_code=404, detail=f"Case not found: {case_id}")
+
+    results: list[dict[str, Any]] = []
+    for run in store.list_runs(case_path):
+        row: dict[str, Any] = {
+            "run_id": run.get("run_id"),
+            "llm_model": run.get("model") or "default (.env)",
+            "status": run.get("status"),
+            "started_at": run.get("started_at"),
+            "chosen_model": None,
+            "chosen_params": {},
+            "modeling_technique": None,
+            "data_prep": None,
+            "derived_features": [],
+            "derived_summary": None,
+            "missing_summary": None,
+            "problem_type": None,
+            "score": None,
+            "cv_score": None,
+            "holdout_score": None,
+            "score_metric": None,
+            "success_threshold": None,
+            "meets_threshold": None,
+            "metrics": {},
+            "confusion_matrix": None,
+            "class_labels": {},
+            "ml_success": None,
+            "workflow_complete": None,
+            "halt_reason": None,
+            "total_tokens": None,
+        }
+        state_path = Path(run["artifact_dir"]) / "final_state.json"
+        if state_path.is_file():
+            try:
+                state = CrispDMState.model_validate_json(
+                    state_path.read_text(encoding="utf-8", errors="replace"),
+                )
+            except Exception:
+                state = None
+            if state is not None:
+                cm = state.md.chosen_model
+                sc = state.config.success_criterion
+                bundle = cm.evaluation_bundle if cm else None
+                score = None
+                if cm is not None:
+                    score = cm.holdout_score if cm.holdout_score is not None else cm.cv_score
+                direction = criterion_direction(sc.metric, sc.direction)
+
+                da = state.dp.derived_attributes or {}
+                da_items = da.get("items") if isinstance(da, dict) else None
+                derived = (
+                    [
+                        it.get("field")
+                        for it in da_items
+                        if isinstance(it, dict) and it.get("field")
+                    ]
+                    if isinstance(da_items, list)
+                    else []
+                )
+                dc = state.dp.data_cleaning_report or {}
+                mb = dc.get("missing_before") if isinstance(dc, dict) else {}
+                dropped = dc.get("columns_dropped") or [] if isinstance(dc, dict) else []
+                mb = mb if isinstance(mb, dict) else {}
+                filled = [
+                    c for c, n in mb.items()
+                    if isinstance(n, (int, float)) and n > 0 and c not in dropped
+                ]
+                dropped_missing = [
+                    c for c, n in mb.items()
+                    if isinstance(n, (int, float)) and n > 0 and c in dropped
+                ]
+                parts = []
+                if filled:
+                    parts.append("filled " + ", ".join(filled))
+                if dropped_missing:
+                    parts.append("dropped " + ", ".join(dropped_missing))
+                if parts:
+                    _ms = "; ".join(parts) + "."
+                    missing_summary = _ms[:1].upper() + _ms[1:]
+                else:
+                    missing_summary = "No missing values to handle."
+                derived_summary = (
+                    f"Engineered {len(derived)} feature(s): " + ", ".join(derived) + "."
+                    if derived
+                    else "No new features engineered."
+                )
+
+                row.update(
+                    {
+                        "chosen_model": cm.technique if cm else None,
+                        "chosen_params": dict(cm.parameter_settings) if cm else {},
+                        "modeling_technique": state.md.modeling_technique,
+                        "data_prep": state.dp.dataset_description,
+                        "derived_features": derived,
+                        "derived_summary": derived_summary,
+                        "missing_summary": missing_summary,
+                        "problem_type": (
+                            bundle.problem_type if bundle else state.config.problem_type
+                        ),
+                        "metrics": dict(bundle.metrics) if bundle else {},
+                        "confusion_matrix": bundle.confusion_matrix if bundle else None,
+                        "class_labels": dict(bundle.class_labels) if bundle else {},
+                        "score": score,
+                        "cv_score": cm.cv_score if cm else None,
+                        "holdout_score": cm.holdout_score if cm else None,
+                        "score_metric": sc.metric,
+                        "success_threshold": sc.threshold,
+                        "meets_threshold": (
+                            score_meets_threshold(
+                                score, sc.threshold, direction=direction
+                            )
+                            if score is not None and sc.threshold is not None
+                            else None
+                        ),
+                        "ml_success": ml_run_succeeded(state),
+                        "workflow_complete": workflow_complete(state),
+                        "halt_reason": state.halt_reason,
+                        "total_tokens": sum(state.token_spend.values()) or None,
+                    },
+                )
+        results.append(row)
+
+    from maads.dashboard.insights import attach_badges, build_run_insight
+
+    for row in results:
+        row["insight"] = build_run_insight(row)
+    attach_badges(results)
+
+    # newest first
+    results.sort(key=lambda r: r.get("started_at") or "", reverse=True)
+    return results
 
 
 @router.get("/cases/{case_id}/live_summary")
@@ -273,10 +418,20 @@ def _handoff_file_response(case_id: str, run_id: str | None = None) -> FileRespo
         zip_path.parent.mkdir(parents=True, exist_ok=True)
         zip_path.write_bytes(build_handoff_zip(state, paths))
 
+    # Name the download by dataset + model so files from different runs/models
+    # don't collide (e.g. house_prices__gpt-4o__handoff.zip).
+    model = None
+    try:
+        model = json.loads(paths.manifest.read_text(encoding="utf-8")).get("model")
+    except Exception:
+        pass
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{case_id}__{model or 'default'}").strip("-")
+    download_name = f"{slug}__{HANDOFF_ZIP_NAME}"
+
     return FileResponse(
         zip_path,
         media_type="application/zip",
-        filename=HANDOFF_ZIP_NAME,
+        filename=download_name,
     )
 
 

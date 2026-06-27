@@ -43,6 +43,14 @@ def write_run_reports(
     if stamp_path.is_file() and not force:
         return
 
+    from maads.reports.md_paths import run_meta_md
+
+    try:
+        _model = json.loads(paths.manifest.read_text(encoding="utf-8")).get("model")
+    except Exception:
+        _model = None
+    meta_md = run_meta_md(state.config.case_id, _model, paths.run_dir.name)
+
     comm_summary = build_communications_summary(communications or [])
     postmortem = build_postmortem(state, paths, trace=trace, comm_summary=comm_summary)
     (paths.reports / "postmortem.json").write_text(
@@ -54,7 +62,8 @@ def write_run_reports(
         json.dumps(case_report, indent=2, default=str), encoding="utf-8",
     )
     (paths.reports / "case_report.md").write_text(
-        render_case_report_md(
+        meta_md
+        + render_case_report_md(
             case_report,
             md_dir=paths.reports,
             run_dir=paths.run_dir,
@@ -69,7 +78,8 @@ def write_run_reports(
         json.dumps(analysis, indent=2, default=str), encoding="utf-8",
     )
     (paths.reports / "execution_analysis.md").write_text(
-        render_execution_analysis_md(
+        meta_md
+        + render_execution_analysis_md(
             analysis,
             md_dir=paths.reports,
             run_dir=paths.run_dir,
@@ -87,6 +97,13 @@ def write_run_reports(
         story_spec = None
     if story_spec is not None:
         report_path = write_final_report(state, story_spec, paths.run_dir)
+        try:
+            report_path.write_text(
+                meta_md + report_path.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
         state.dep.final_report_path = str(report_path)
 
     write_handoff_bundle(state, paths, analysis=analysis)
