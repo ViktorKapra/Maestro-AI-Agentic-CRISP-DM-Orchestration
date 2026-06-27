@@ -88,18 +88,46 @@ def resolve_model_for_agent(agent_name: str) -> str:
     return top if tier == "top" else mid
 
 
+def _structured_outputs_setting() -> str:
+    return os.getenv("MAADS_STRUCTURED_OUTPUTS", "auto").lower()
+
+
 def structured_outputs_enabled(agent_name: str, model: str) -> bool:
     """Whether to request OpenAI-style json_schema strict mode for this agent."""
-    setting = os.getenv("MAADS_STRUCTURED_OUTPUTS", "auto").lower()
-    if setting in {"0", "false", "no", "off"}:
+    if _structured_outputs_setting() in {"0", "false", "no", "off"}:
         return False
     if agent_name not in _STRUCTURED_OUTPUT_AGENTS:
         return False
-    if model.startswith("ollama/"):
-        return setting in {"1", "true", "yes", "on", "force"}
-    if setting in {"1", "true", "yes", "on", "force"}:
-        return True
-    return setting == "auto"
+    response_format = _json_response_format_for_agent(agent_name, model)
+    from pydantic import BaseModel
+
+    return isinstance(response_format, type) and issubclass(response_format, BaseModel)
+
+
+def _json_response_format_for_agent(
+    agent_name: str, model: str
+) -> type[Any] | dict[str, str] | None:
+    """Pick Pydantic schema, JSON mode, or prompt-only based on live model probes."""
+    setting = _structured_outputs_setting()
+    if setting in {"0", "false", "no", "off"}:
+        return None
+    if agent_name not in _STRUCTURED_OUTPUT_AGENTS:
+        return None
+
+    from maads.model_capabilities import JsonFormatMode, get_model_capabilities
+    from maads.output_contracts import output_model_for_agent
+
+    output_model = output_model_for_agent(agent_name)
+    caps = get_model_capabilities(model)
+    force = setting in {"1", "true", "yes", "on", "force"}
+
+    if force and output_model is not None:
+        return output_model
+    if caps.mode == JsonFormatMode.STRUCTURED_OUTPUTS and output_model is not None:
+        return output_model
+    if caps.mode == JsonFormatMode.JSON_MODE:
+        return {"type": "json_object"}
+    return None
 
 
 @lru_cache(maxsize=32)
@@ -118,12 +146,9 @@ def build_llm(agent_name: str) -> LLM:
         return LLM(**kwargs)
 
     kwargs = {"model": model}
-    if structured_outputs_enabled(agent_name, model):
-        from maads.output_contracts import output_model_for_agent
-
-        output_model = output_model_for_agent(agent_name)
-        if output_model is not None:
-            kwargs["response_format"] = output_model
+    response_format = _json_response_format_for_agent(agent_name, model)
+    if response_format is not None:
+        kwargs["response_format"] = response_format
     try:
         return LLM(**kwargs)
     except (ImportError, TypeError, ValueError):
@@ -231,10 +256,12 @@ def agent_for(name: str, dataset_name: str = "") -> Agent:
 def reset_llm_caches() -> None:
     """Clear cached agents/LLMs (for tests after env changes)."""
     from maads.knowledge_setup import domain_knowledge_sources
+    from maads.model_capabilities import reset_model_capabilities_cache
     from maads.rag import clear_rag_cache
 
     build_llm.cache_clear()
     agent_for.cache_clear()
     _agent_tiers.cache_clear()
     domain_knowledge_sources.cache_clear()
+    reset_model_capabilities_cache()
     clear_rag_cache()

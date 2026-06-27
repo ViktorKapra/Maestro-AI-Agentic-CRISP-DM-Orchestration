@@ -19,8 +19,10 @@ def _clear_llm_caches(monkeypatch: pytest.MonkeyPatch) -> None:
         "OPENAI_MODEL_TOP",
         "OPENAI_MODEL_MID",
         "OPENAI_MODEL_CODE",
+        "MAADS_SKIP_MODEL_PROBE",
     ):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MAADS_SKIP_MODEL_PROBE", "1")
     reset_llm_caches()
     yield
     reset_llm_caches()

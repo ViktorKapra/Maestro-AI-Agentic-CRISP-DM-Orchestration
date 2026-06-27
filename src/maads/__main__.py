@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from maads.artifact_runs import case_root, prepare_run_dir
 from maads.artifact_paths import ensure_run_layout
 from maads.knowledge_setup import repo_root
+from maads.model_capabilities import log_model_capabilities
 from maads.rag import ensure_embedding_model_available
 
 from maads.config import load_case_config, kickoff_inputs
@@ -117,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "data" and args.data_cmd is None:
         p_data.print_help()
         return 0
+
+    log_model_capabilities()
 
     if args.cmd == "run":
         return cmd_run(args)
