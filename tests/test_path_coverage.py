@@ -12,7 +12,7 @@ from maads.crew import CrewKickoffError
 from maads.flow import phase_runner as pr
 from maads.paths import resolve_path
 from maads.state import SUBSTEPS, CrispDMState, ModelRun, Phase
-from maads.testing.fake_llm import fake_llm_response
+from maads.token_budget import HALT_REASON
 from maads.testing.fake_llm import fake_llm_response
 from maads.testing.flow_harness import make_flow, make_run_context
 
@@ -149,7 +149,7 @@ def test_token_budget_halts(mock_llm, titanic_state: CrispDMState, tmp_path: Pat
     flow.run()
 
     assert titanic_state.halted
-    assert titanic_state.halt_reason == "token budget exceeded"
+    assert titanic_state.halt_reason == HALT_REASON
 
 
 @patch("maads.agents.run_json_task")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -77,7 +78,9 @@ class RunPaths:
         return legacy if legacy.is_file() else collected
 
 
-def ensure_run_layout(run_dir: Path, *, run_id: str, case_id: str) -> RunPaths:
+def ensure_run_layout(
+    run_dir: Path, *, run_id: str, case_id: str, model: str | None = None,
+) -> RunPaths:
     """Create bucket directories and an initial manifest stub."""
     paths = RunPaths(run_dir)
     paths.collected.mkdir(parents=True, exist_ok=True)
@@ -87,15 +90,18 @@ def ensure_run_layout(run_dir: Path, *, run_id: str, case_id: str) -> RunPaths:
     paths.reports.mkdir(parents=True, exist_ok=True)
     paths.trace_legacy.mkdir(parents=True, exist_ok=True)
     if not paths.manifest.is_file():
-        write_manifest_stub(paths, run_id=run_id, case_id=case_id)
+        write_manifest_stub(paths, run_id=run_id, case_id=case_id, model=model)
     return paths
 
 
-def write_manifest_stub(paths: RunPaths, *, run_id: str, case_id: str) -> None:
+def write_manifest_stub(
+    paths: RunPaths, *, run_id: str, case_id: str, model: str | None = None,
+) -> None:
     payload = {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_id,
         "case_id": case_id,
+        "model": model,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "buckets": {
             "collected": [
@@ -180,6 +186,7 @@ def update_runs_index(case_root_path: Path, *, run_id: str, manifest: dict[str, 
     entries = [e for e in entries if e.get("run_id") != run_id]
     entries.append({
         "run_id": run_id,
+        "model": manifest.get("model"),
         "started_at": manifest.get("started_at"),
         "ended_at": manifest.get("ended_at"),
         "workflow_complete": manifest.get("workflow_complete"),
@@ -188,7 +195,10 @@ def update_runs_index(case_root_path: Path, *, run_id: str, manifest: dict[str, 
         "artifact_dir": f"runs/{run_id}",
     })
     entries.sort(key=lambda e: e.get("ended_at") or e.get("started_at") or "", reverse=True)
-    index_path.write_text(
+    # Atomic write: concurrent same-case completions must not corrupt the index.
+    tmp_path = index_path.with_name(f"{index_path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(
         json.dumps({"case_id": manifest.get("case_id"), "runs": entries}, indent=2),
         encoding="utf-8",
     )
+    os.replace(tmp_path, index_path)

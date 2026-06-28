@@ -1,6 +1,7 @@
 """Tests for graceful Ctrl+C shutdown."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -50,7 +51,7 @@ def test_flow_halts_when_shutdown_requested(tmp_path: Path):
     assert state.halted
 
 
-@patch("maads.__main__.CrispDMFlow")
+@patch("maads.flow.crisp_dm_flow.CrispDMFlow")
 def test_cmd_run_returns_130_on_keyboard_interrupt(mock_flow_cls, tmp_path: Path):
     from maads.__main__ import cmd_run
     import argparse
@@ -65,6 +66,7 @@ def test_cmd_run_returns_130_on_keyboard_interrupt(mock_flow_cls, tmp_path: Path
         config_dir="configs",
         artifact_dir=str(tmp_path / "artifacts"),
         quiet=True,
+        model=None,
     )
     code = cmd_run(args)
     assert code == 130
@@ -74,3 +76,36 @@ def test_cmd_run_returns_130_on_keyboard_interrupt(mock_flow_cls, tmp_path: Path
     final = finals[0]
     assert final.is_file()
     assert INTERRUPT_HALT_REASON in final.read_text()
+
+
+@patch("maads.flow.crisp_dm_flow.CrispDMFlow")
+def test_cmd_run_persists_reports_on_flow_failure(mock_flow_cls, tmp_path: Path):
+    from maads.__main__ import cmd_run
+    import argparse
+
+    reset_shutdown_state()
+    config_path = resolve_path("configs/titanic.yaml")
+    mock_flow_cls.return_value.run.side_effect = TypeError(
+        "float() argument must be a string or a real number, not 'dict'"
+    )
+
+    args = argparse.Namespace(
+        config=config_path,
+        case=None,
+        config_dir="configs",
+        artifact_dir=str(tmp_path / "artifacts"),
+        quiet=True,
+        model=None,
+    )
+    code = cmd_run(args)
+    assert code == 1
+    runs_dir = tmp_path / "artifacts" / "titanic" / "runs"
+    run_dirs = list(runs_dir.iterdir())
+    assert len(run_dirs) == 1
+    run_dir = run_dirs[0]
+    assert (run_dir / "final_state.json").is_file()
+    assert (run_dir / "reports" / "case_report.md").is_file()
+    assert (run_dir / "reports" / ".generated").is_file()
+    final = json.loads((run_dir / "final_state.json").read_text(encoding="utf-8"))
+    assert final["halted"] is True
+    assert "run failed" in (final.get("halt_reason") or "")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from maads.codegen import _extract_code, run_authored_code
+from maads.codegen import _codegen_response_blocked, _extract_code, classify_codegen_response, run_authored_code
 from maads.config import load_case_config
 from maads.paths import resolve_path
 from maads.state import CrispDMState
@@ -43,6 +43,91 @@ def test_extract_code_handles_fences_and_raw():
     assert _extract_code("```\nprint(2)\n```") == "print(2)"
     assert _extract_code("print(3)") == "print(3)"
     assert _extract_code("   ") is None
+
+
+def test_extract_code_unwraps_json_object():
+    """gpt-class models sometimes return {"code": "...\\n..."} instead of a fence."""
+    raw = '{"code": "import json\\nprint(json.dumps({\\"ok\\": True}))"}'
+    code = _extract_code(raw)
+    assert code == 'import json\nprint(json.dumps({"ok": True}))'
+    compile(code, "<t>", "exec")  # real newlines, not literal \n
+
+
+def test_extract_code_unwraps_json_string():
+    raw = '"import os\\nprint(os.getcwd())"'
+    assert _extract_code(raw) == "import os\nprint(os.getcwd())"
+
+
+def test_extract_code_unwraps_json_inside_fence():
+    raw = '```json\n{"code": "x = 1\\nprint(x)"}\n```'
+    assert _extract_code(raw) == "x = 1\nprint(x)"
+
+
+def test_extract_code_decodes_escaped_newlines_in_fence():
+    """Code escaped inside a fence (literal backslash-n) is decoded if it helps."""
+    raw = "```python\\nimport json\\nprint(1)\\n```"
+    code = _extract_code(raw)
+    assert code is not None
+    assert "\\n" not in code
+    compile(code, "<t>", "exec")
+
+
+def test_extract_code_prefers_normal_python():
+    """A normal, already-compilable snippet is returned untouched (no JSON guess)."""
+    src = "import json\ndata = {'a': 1}\nprint(json.dumps(data))"
+    assert _extract_code(src) == src
+
+
+def test_authored_code_recovers_from_json_wrapped_response(monkeypatch, pyexec, state):
+    """End-to-end: a JSON-wrapped code response still runs and satisfies the contract."""
+    _patch_llm(monkeypatch, [
+        '{"code": "import json\\nprint(json.dumps({\\"n\\": N + 1}))"}',
+    ])
+    res = run_authored_code(
+        pyexec=pyexec, agent_name="data_scientist", state=state,
+        instruction="add one to N",
+        header_vars={"N": 41},
+        contract=lambda p: [] if p.get("n") == 42 else ["wrong n"],
+        max_retries=1,
+    )
+    assert res.ok and res.payload == {"n": 42}
+
+
+def test_codegen_response_blocked_detects_refusal():
+    raw = (
+        '{"status":"BLOCKED","message":"Cannot provide Python code block because '
+        'JSON-only mode is active."}'
+    )
+    assert _codegen_response_blocked(raw) is not None
+    assert "Cannot provide" in _codegen_response_blocked(raw)
+
+
+def test_classify_codegen_response_json_wrapper():
+    raw = '{"code": "import json\\nprint(1)"}'
+    info = classify_codegen_response(raw)
+    assert info["response_shape"] == "json_code_wrapper"
+    assert info["json_valid"] is True
+    assert info["parse_ok"] is True
+    assert info["parsed_json"] is not None
+
+
+def test_authored_code_retries_on_blocked_json(monkeypatch, pyexec, state):
+    blocked = (
+        '{"status":"BLOCKED","message":"JSON-only response required; no markdown fences."}'
+    )
+    _patch_llm(monkeypatch, [
+        blocked,
+        '```python\nimport json\nprint(json.dumps({"n": N + 1}))\n```',
+    ])
+    res = run_authored_code(
+        pyexec=pyexec, agent_name="data_scientist", state=state,
+        instruction="add one to N",
+        header_vars={"N": 41},
+        contract=lambda p: [] if p.get("n") == 42 else ["wrong n"],
+        max_retries=2,
+    )
+    assert res.ok and res.payload == {"n": 42}
+    assert res.attempts == 2
 
 
 def test_authored_code_success(monkeypatch, pyexec, state):

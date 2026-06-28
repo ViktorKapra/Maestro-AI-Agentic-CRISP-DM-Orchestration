@@ -303,6 +303,7 @@ class LLMCommunicationRegistry:
         schema_ok: bool | None = None,
         schema_errors: list[str] | None = None,
         repair: dict[str, Any] | None = None,
+        response_shape: str | None = None,
         tokens: dict[str, int | None] | None = None,
         error: str | None = None,
         trace_event_id: str | None = None,
@@ -335,6 +336,8 @@ class LLMCommunicationRegistry:
                 outcome["schema_errors"] = schema_errors
             if repair:
                 outcome["repair"] = repair
+            if response_shape:
+                outcome["response_shape"] = response_shape
             if error:
                 outcome["error"] = error
             if mode != "off":

@@ -41,9 +41,9 @@
   --app-font: "Quicksand", ui-rounded, system-ui, sans-serif;
   --app-text: #3b1f47;
   --app-bg:
-    radial-gradient(1200px 600px at 10% -10%, #f3e8ff 0%, transparent 60%),
-    radial-gradient(1000px 500px at 110% 10%, #ffe4ef 0%, transparent 55%),
-    linear-gradient(160deg, #faf0ff 0%, #fff0f6 100%);
+    radial-gradient(1100px 560px at 12% -8%, #ffd9ee 0%, transparent 60%),
+    radial-gradient(1000px 520px at 110% 8%, #ffe0ef 0%, transparent 55%),
+    linear-gradient(160deg, #ffcfe7 0%, #ffe4f1 45%, #f7ecff 100%);
   --ring-glow: 217 70 239; /* pulse-ring color */
   --scrollbar-track: #fbe9f5;
   --scrollbar-thumb: #e9a8d6;
@@ -53,6 +53,15 @@
   --brand-from: #d946ef;
   --brand-via: #ec4899;
   --brand-to: #a855f7;
+
+  /* Fine diamond carbon mesh (shared definition; only shown when
+     --carbon-opacity > 0, which the business theme sets). Two mirrored sets
+     of steep diagonal lines form elongated diamonds; each line pairs a faint
+     highlight with a dark edge for a subtle bevelled, woven look. Translucent
+     so it tints whatever background sits beneath it. */
+  --carbon-opacity: 0;
+  --carbon-size: 18px 31.5px;
+  --carbon: url("data:image/svg+xml,%3Csvg width='28' height='49' viewBox='0 0 28 49' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 
 /* 💻 Nebula — modern, professional dark theme tuned for a
@@ -83,10 +92,20 @@
 
   --app-font: "Inter", system-ui, -apple-system, sans-serif;
   --app-text: #e2e8f0;
+  /* Royal-blue radial glow in the centre fading to black at the edges.
+     The carbon mesh texture is a separate translucent layer (body::before). */
   --app-bg:
-    radial-gradient(1100px 600px at 8% -12%, #0e2a4a 0%, transparent 60%),
-    radial-gradient(900px 500px at 112% 8%, #1e1b4b 0%, transparent 55%),
-    linear-gradient(160deg, #0b1220 0%, #0d1426 100%);
+    radial-gradient(
+      ellipse 80% 75% at 50% 47%,
+      #3c6098 0%,
+      #2f5283 12%,
+      #244064 26%,
+      #182c46 42%,
+      #0d1a2e 58%,
+      #060e1c 74%,
+      #02050d 88%,
+      #000000 100%
+    );
   --ring-glow: 56 189 248;
   --scrollbar-track: #0f172a;
   --scrollbar-thumb: #334155;
@@ -95,6 +114,14 @@
   --brand-from: #22d3ee;
   --brand-via: #38bdf8;
   --brand-to: #6366f1;
+  --carbon-opacity: 0.3;
+}
+
+/* 🌸 Pink theme keeps the same hexagon weave, but in a soft rose tint so it's
+   visible on the light background — a delicate, cute texture. */
+:root[data-theme="pink"] {
+  --carbon-opacity: 0.6;
+  --carbon: url("data:image/svg+xml,%3Csvg width='28' height='49' viewBox='0 0 28 49' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d6409f' fill-opacity='0.07'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 
 body {
@@ -107,6 +134,20 @@ body {
   transition:
     background 0.4s ease,
     color 0.4s ease;
+}
+
+/* Carbon-fibre weave overlay — sits above the background gradient but behind
+   all content. Hidden in the pink theme (--carbon-opacity: 0). */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--carbon);
+  background-size: var(--carbon-size);
+  opacity: var(--carbon-opacity);
+  transition: opacity 0.4s ease;
 }
 
 @keyframes pulse-ring {
@@ -144,6 +185,51 @@ body {
 /* soft glow on cards */
 .glow-card {
   box-shadow: var(--card-glow);
+}
+
+/* staggered entrance reveal (hero elements) */
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.reveal {
+  opacity: 0;
+  animation: reveal-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+/* quick fade-in (hover tooltips) */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-in {
+  animation: fade-in 0.16s ease-out both;
+}
+
+/* horizontally scrollable rows (e.g. the tab bar) without a visible bar */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* ──────────────────────────────────────────────────────────────

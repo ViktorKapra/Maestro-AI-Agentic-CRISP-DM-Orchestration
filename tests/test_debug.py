@@ -354,10 +354,18 @@ def test_de_32_debug_without_baseline_fallback(
     def fake_text(agent_name, *_a, **_k):
         calls.append(agent_name)
         if agent_name == "developer":
+            # The fix must write a real train parquet that PRESERVES the target,
+            # otherwise the 3.2 contract's target_preserved check rejects it.
             return (
-                '```python\n'
-                "import json\n"
-                'print(json.dumps({"train_out": "t", "test_out": "u", '
+                "```python\n"
+                "import json, os\n"
+                "import pandas as pd\n"
+                "os.makedirs(OUTDIR, exist_ok=True)\n"
+                "tp = os.path.join(OUTDIR, 'train_clean.parquet')\n"
+                "sp = os.path.join(OUTDIR, 'test_clean.parquet')\n"
+                "pd.DataFrame({TARGET: [0, 1], 'Age': [22, 38]}).to_parquet(tp)\n"
+                "pd.DataFrame({'Age': [22, 38]}).to_parquet(sp)\n"
+                'print(json.dumps({"train_out": tp, "test_out": sp, '
                 '"missing_before": {}, "missing_after": {}}))\n'
                 "```"
             )

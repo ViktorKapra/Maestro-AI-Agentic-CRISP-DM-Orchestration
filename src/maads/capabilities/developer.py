@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from maads.codegen import run_authored_code
+from maads.capabilities.data_scientist import _TEXT_HEADER_HELPERS
 from maads.capabilities.shared import abspath as _abspath, has_keys as _has_keys
 from maads.deltas import StateDelta
 from maads.knowledge_setup import append_experience_to_knowledge
@@ -18,14 +19,81 @@ _SUBMISSION_INSTRUCTION = (
     "training set, generate predictions for the prepared test set, and write "
     "OUTPUT_PATH. Load SAMPLE_SUBMISSION as the authoritative schema template — "
     "column names, dtypes, and row count must match exactly before writing. "
-    "Parse CHOSEN_MODEL for technique and parameter_settings; mirror the pipeline "
-    "that passed evaluation in Phase 4–5. Respect PROBLEM_TYPE and EVAL_METRIC "
-    "(e.g. log-transform the target when the metric name contains 'log'). "
+    "Parse CHOSEN_MODEL with load_chosen_model() (or json.loads when it is a string) "
+    "in code (pipelines are not persisted from Phase 4). Respect PROBLEM_TYPE and "
+    "EVAL_METRIC (e.g. log-transform the target when the metric name contains 'log'). "
     "When TEXT_COLUMN is non-empty, treat this as NLP-primary and use that column "
     "as the main feature (parse FEATURE_HINTS for weak categoricals if needed). "
     "Join predictions to ID_COL from the test records; never reorder or drop rows. "
     "Never treat the sample submission as ground-truth labels."
 )
+
+_TEXT_SUBMISSION_BASELINE = """
+import json
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+
+train = pd.read_parquet(TRAIN_PARQUET)
+test = pd.read_parquet(TEST_PARQUET)
+X_train = drop_feature_columns(train)
+y = train[TARGET].astype(int).values
+X_test = drop_feature_columns(test)
+primary_text = PRIMARY_TEXT_COL if PRIMARY_TEXT_COL in X_train.columns else None
+text_cols = [
+    c for c in X_train.columns
+    if str(X_train[c].dtype) == "object" or str(X_train[c].dtype).startswith("string")
+]
+if not primary_text:
+    primary_text = next((c for c in text_cols if c == "text"), None)
+if not primary_text and TEXT_COLUMN and TEXT_COLUMN in X_train.columns:
+    primary_text = TEXT_COLUMN
+if not primary_text and text_cols:
+    primary_text = text_cols[0]
+num_cols = X_train.select_dtypes(include="number").columns.tolist()
+transformers = []
+if primary_text:
+    transformers.append((
+        primary_text,
+        text_vectorizer_pipeline(ngram_range=(1, 2), max_features=50000, min_df=2),
+        [primary_text],
+    ))
+if num_cols:
+    transformers.append((
+        "num",
+        Pipeline([("imp", SimpleImputer(strategy="median")), ("sc", StandardScaler())]),
+        num_cols,
+    ))
+pre = ColumnTransformer(transformers, remainder="drop")
+clf = LogisticRegression(max_iter=2000, solver="liblinear", class_weight="balanced", random_state=42)
+pipe = Pipeline([("pre", pre), ("clf", clf)])
+pipe.fit(X_train, y)
+preds = pipe.predict(X_test).astype(int)
+sample = pd.read_csv(SAMPLE_SUBMISSION)
+idc = ID_COL if ID_COL in sample.columns else sample.columns[0]
+target_col = TARGET if TARGET in sample.columns else sample.columns[1]
+if ID_COL in test.columns:
+    sub = pd.DataFrame({idc: test[ID_COL].values, target_col: preds})
+else:
+    sub = pd.DataFrame({idc: sample[idc].values, target_col: preds})
+sub = sub.reindex(columns=list(sample.columns))
+assert list(sub.columns) == list(sample.columns)
+assert len(sub) == len(sample)
+sub.to_csv(OUTPUT_PATH, index=False)
+print(json.dumps({"submission_path": OUTPUT_PATH, "rows": int(len(sub))}))
+"""
+
+_DEVELOPER_HEADER_HELPERS = """
+def load_chosen_model():
+    import json
+    raw = CHOSEN_MODEL
+    if isinstance(raw, str):
+        return json.loads(raw) if raw.strip() else {}
+    return raw or {}
+"""
 
 
 def _submission_contract(sample_csv: str) -> callable:
@@ -68,6 +136,24 @@ def _primary_text_column(feature_hints: dict) -> str:
     return ""
 
 
+def _is_text_modeling_case(state: CrispDMState) -> bool:
+    return bool(_primary_text_column(state.config.feature_hints or {}))
+
+
+def _run_text_submission_baseline(pyexec: PythonExec, header_vars: dict[str, str]) -> dict:
+    from maads.capabilities.data_scientist import _TEXT_HEADER_HELPERS
+    from maads.codegen import _header, _last_json_line
+
+    header = _header(header_vars, helpers=_TEXT_HEADER_HELPERS)
+    res = pyexec.run(header + _TEXT_SUBMISSION_BASELINE, label="developer_61_text_fallback")
+    if not res.ok:
+        raise RuntimeError((res.stderr or "text submission baseline failed").strip()[-500:])
+    payload = _last_json_line(res.stdout)
+    if not payload:
+        raise RuntimeError("text submission baseline printed no JSON")
+    return payload
+
+
 def build_submission(
     pyexec: PythonExec,
     state: CrispDMState,
@@ -82,25 +168,37 @@ def build_submission(
     sample = _abspath(state.config.data.sample_submission_csv)
     chosen = state.md.chosen_model.model_dump() if state.md.chosen_model else {}
     feature_hints = state.config.feature_hints or {}
+    text_col = _primary_text_column(feature_hints)
+    text_case = _is_text_modeling_case(state)
+    header_vars = {
+        "TRAIN_PARQUET": dataset_train,
+        "TEST_PARQUET": dataset_test,
+        "TARGET": state.config.target_column,
+        "ID_COL": state.config.id_column,
+        "PROBLEM_TYPE": state.config.problem_type,
+        "EVAL_METRIC": state.config.evaluation_metric,
+        "SAMPLE_SUBMISSION": sample,
+        "OUTPUT_PATH": out,
+        "CHOSEN_MODEL": json.dumps(chosen),
+        "FEATURE_HINTS": json.dumps(feature_hints),
+        "TEXT_COLUMN": text_col,
+        "PRIMARY_TEXT_COL": text_col or "text",
+    }
+
+    def _text_fallback() -> dict:
+        return _run_text_submission_baseline(pyexec, header_vars)
 
     res = run_authored_code(
         pyexec=pyexec,
         agent_name="developer",
         state=state,
         instruction=_SUBMISSION_INSTRUCTION,
-        header_vars={
-            "TRAIN_PARQUET": dataset_train,
-            "TEST_PARQUET": dataset_test,
-            "TARGET": state.config.target_column,
-            "ID_COL": state.config.id_column,
-            "PROBLEM_TYPE": state.config.problem_type,
-            "EVAL_METRIC": state.config.evaluation_metric,
-            "SAMPLE_SUBMISSION": sample,
-            "OUTPUT_PATH": out,
-            "CHOSEN_MODEL": json.dumps(chosen),
-            "FEATURE_HINTS": json.dumps(feature_hints),
-            "TEXT_COLUMN": _primary_text_column(feature_hints),
-        },
+        header_vars=header_vars,
+        header_helpers=(
+            (_TEXT_HEADER_HELPERS + "\n" + _DEVELOPER_HEADER_HELPERS) if text_case else _DEVELOPER_HEADER_HELPERS
+        ),
+        fallback=_text_fallback if text_case else None,
+        fallback_code="text_tfidf_logreg_submission_baseline",
         contract=_submission_contract(sample),
         contract_hint=(
             "Required keys: submission_path (str, absolute path to written CSV), "

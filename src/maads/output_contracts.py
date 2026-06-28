@@ -69,8 +69,8 @@ Shape rules for specialist agent output:
 _SUBSTEP_SCHEMA_EXAMPLES: dict[tuple[str, str], str] = {
     ("data_scientist", "4.1"): (
         'Example for 4.1 (fragment): "state_updates": {"md": {"modeling_technique": '
-        '"logistic_regression", "modeling_assumptions": ["text is primary signal"]}}, '
-        '"assumptions": [{"statement": "TF-IDF baseline first", "basis": "feature_hints"}], '
+        '"lightgbm", "modeling_assumptions": ["text is primary signal; TF-IDF baseline first"]}}, '
+        '"assumptions": [{"statement": "Start with linear baseline", "basis": "feature_hints"}], '
         '"risks": []'
     ),
 }

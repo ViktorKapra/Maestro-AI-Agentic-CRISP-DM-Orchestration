@@ -16,4 +16,5 @@ def project_root():
 @pytest.fixture(autouse=True)
 def stub_de_ds_codegen(monkeypatch: pytest.MonkeyPatch):
     """Provide titanic-oriented authored code for DE/DS integration tests."""
+    monkeypatch.setenv("MAADS_SKIP_MODEL_PROBE", "1")
     monkeypatch.setattr("maads.crew.run_text_task", fake_run_text_task)

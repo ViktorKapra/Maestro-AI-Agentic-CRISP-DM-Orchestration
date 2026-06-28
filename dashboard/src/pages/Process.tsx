@@ -1,4 +1,5 @@
 import { ConclusionsPanel } from "../components/ConclusionsPanel";
+import { Loading } from "../components/Loading";
 import { PhaseRail } from "../components/PhaseRail";
 import { SubstepChecklist } from "../components/SubstepChecklist";
 import { TeamCard } from "../components/TeamCard";
@@ -20,7 +21,7 @@ export function Process({ caseId }: Props) {
   }
 
   if (isLoading && !process) {
-    return <p className="text-slate-500">Loading process view…</p>;
+    return <Loading label="Loading process view…" />;
   }
 
   return (
@@ -42,7 +43,7 @@ export function Process({ caseId }: Props) {
 
       <section className="rounded-xl border border-surface-border bg-surface-raised p-5 space-y-4">
         <h2 className="text-lg font-medium">Team</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {process?.team.map((member) => (
             <TeamCard key={member.id} member={member} />
           ))}

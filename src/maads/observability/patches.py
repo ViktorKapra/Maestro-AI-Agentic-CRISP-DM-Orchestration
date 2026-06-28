@@ -106,6 +106,7 @@ def _patch_crew() -> None:
         kickoff: Callable[[], Any],
         *,
         span_suffix: str,
+        json_enforced: bool = True,
         parsed_ok: Callable[[Any], bool] | None = None,
     ) -> Any:
         coll = get_collector()
@@ -115,7 +116,7 @@ def _patch_crew() -> None:
         ctx.current_substep.set(substep)
 
         description, state_view, agent = build_task_description(
-            agent_name, instruction, state, schema_hint
+            agent_name, instruction, state, schema_hint, json_enforced=json_enforced,
         )
         model_name = getattr(getattr(agent, "llm", None), "model", None)
         role = AGENT_PROMPTS.get(agent_name, {}).get("role")
@@ -183,18 +184,33 @@ def _patch_crew() -> None:
             sizes = registry.preview_sizes(comm_id)
 
             task_meta = pop_last_json_task_meta() if span_suffix == "json" else None
+            response_shape: str | None = None
             if task_meta is not None:
                 json_valid = bool(task_meta.get("json_valid"))
                 schema_ok = bool(task_meta.get("schema_ok"))
                 schema_errors = list(task_meta.get("schema_errors") or [])
                 repair = task_meta.get("repair")
                 parse_ok = json_valid and schema_ok
+                parsed_for_record = result if isinstance(result, dict) else None
+            elif span_suffix == "text":
+                from maads.codegen import classify_codegen_response
+
+                raw_text = raw_output if raw_output is not None else str(result or "")
+                classified = classify_codegen_response(raw_text)
+                response_shape = classified["response_shape"]
+                json_valid = bool(classified["json_valid"])
+                parse_ok = bool(classified["parse_ok"])
+                schema_ok = parse_ok
+                schema_errors = []
+                repair = None
+                parsed_for_record = classified.get("parsed_json")
             elif parsed_ok:
                 parse_ok = parsed_ok(result)
                 json_valid = parse_ok
                 schema_ok = parse_ok
                 schema_errors = []
                 repair = None
+                parsed_for_record = result if isinstance(result, dict) else None
                 if span_suffix == "json" and isinstance(result, dict):
                     schema_errors = validate_agent_output(
                         agent_name, result, substep=substep,
@@ -208,16 +224,18 @@ def _patch_crew() -> None:
                 schema_ok = parse_ok
                 schema_errors = []
                 repair = None
+                parsed_for_record = result if isinstance(result, dict) else None
 
             registry.close_record(
                 comm_id,
                 raw_response=raw_output,
-                parsed_json=result if isinstance(result, dict) else None,
+                parsed_json=parsed_for_record,
                 parse_ok=parse_ok,
                 json_valid=json_valid,
                 schema_ok=schema_ok,
                 schema_errors=schema_errors or None,
                 repair=repair,
+                response_shape=response_shape,
                 tokens={"total": total_tokens},
                 duration_ms=duration_ms,
             )
@@ -288,6 +306,7 @@ def _patch_crew() -> None:
                 agent_name, instruction, state, schema_hint, artifact_dir=artifact_dir,
             ),
             span_suffix="json",
+            json_enforced=True,
             parsed_ok=lambda result: result is not None,
         )
 
@@ -305,9 +324,11 @@ def _patch_crew() -> None:
             instruction,
             state,
             "",
-            lambda: orig_text(agent_name, instruction, state, expected_output),
+            lambda: orig_text(
+                agent_name, instruction, state, expected_output=expected_output,
+            ),
             span_suffix="text",
-            parsed_ok=lambda result: bool(str(result or "").strip()),
+            json_enforced=False,
         )
 
     traced_run_json_task._maads_traced = True  # type: ignore[attr-defined]

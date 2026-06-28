@@ -16,6 +16,12 @@ from typing import Any, Callable
 
 import maads.crew as crew
 from maads.state import CrispDMState
+from maads.token_budget import (
+    TokenBudgetExceeded,
+    code_retries,
+    repairs_allowed,
+    soft_limit_reached,
+)
 from maads.tools import ExecResult, PythonExec
 
 MAX_CODE_RETRIES = 3
@@ -38,17 +44,150 @@ class CodeResult:
         return not self.degraded
 
 
+_FENCE_RE = re.compile(r"```(?:[a-zA-Z0-9_+\-]+)?[ \t]*\r?\n?(.*?)```", re.DOTALL)
+
+
+def _strip_fence(text: str) -> str:
+    """Return the contents of the first ```python fence, or the text unchanged."""
+    m = _FENCE_RE.search(text)
+    return m.group(1).strip() if m else text.strip()
+
+
+def _compiles(src: str) -> bool:
+    try:
+        compile(src, "<authored>", "exec")
+        return True
+    except (SyntaxError, ValueError):
+        return False
+
+
+_CODE_KEYS = ("code", "python", "source", "script", "content")
+_BLOCKED_STATUSES = frozenset({"BLOCKED", "ERROR", "REFUSED"})
+
+
+def _codegen_response_blocked(raw: str) -> str | None:
+    """Return a refusal message when the model returned JSON instead of a code fence."""
+    stripped = raw.strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        obj = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    status = str(obj.get("status", "")).upper()
+    if status not in _BLOCKED_STATUSES:
+        return None
+    return str(obj.get("message") or f"LLM returned status={status}")
+
+
+def classify_codegen_response(raw: str) -> dict[str, Any]:
+    """Classify a codegen ``run_text_task`` response for observability."""
+    from maads.crew import _extract_json
+
+    text = str(raw or "")
+    stripped = text.strip()
+    parsed = _extract_json(stripped) if stripped else None
+    code_extractable = _extract_code(text) is not None
+
+    if stripped.startswith("```"):
+        shape = "markdown_fence"
+    elif parsed is not None and any(
+        isinstance(parsed.get(key), str) and parsed.get(key, "").strip()
+        for key in _CODE_KEYS
+    ):
+        shape = "json_code_wrapper"
+    elif parsed is not None:
+        shape = "other_json"
+    else:
+        shape = "plain_text"
+
+    parsed_json: dict[str, Any] | None = None
+    if parsed is not None:
+        parsed_json = parsed
+    elif code_extractable and stripped.startswith("```"):
+        parsed_json = {"code": _strip_fence(stripped)[:500]}
+
+    return {
+        "response_shape": shape,
+        "parsed_json": parsed_json,
+        "json_valid": parsed is not None,
+        "parse_ok": code_extractable,
+    }
+
+
+def _unwrap_json_code(text: str) -> str | None:
+    """If `text` is JSON the model wrapped the code in, return the Python.
+
+    gpt-class models occasionally return ``{"code": "import ...\\n..."}`` or a
+    bare JSON-escaped string instead of a code block. Returns None when `text`
+    is not such a wrapper, so callers can fall through to the raw text.
+    """
+    stripped = text.strip()
+    if not stripped or stripped[0] not in '{["':
+        return None
+    try:
+        obj = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if isinstance(obj, str):
+        code = obj
+    elif isinstance(obj, dict):
+        code = next(
+            (
+                obj[key]
+                for key in ("code", "python", "source", "script", "content")
+                if isinstance(obj.get(key), str) and obj[key].strip()
+            ),
+            None,
+        )
+        if code is None:
+            return None
+    else:
+        return None
+    return _strip_fence(code) or None
+
+
 def _extract_code(text: str) -> str | None:
-    """Pull a Python block out of LLM output (fenced ``` or raw)."""
+    """Pull runnable Python out of LLM output, tolerating several shapes.
+
+    Order: strip a ```python fence, then prefer the candidate as-is if it already
+    compiles; otherwise try to unwrap JSON-wrapped code (``{"code": "..."}`` or a
+    JSON string), and finally decode literal ``\\n`` escapes — each only when it
+    yields compilable Python. Falls back to the raw text so a genuinely broken
+    response still surfaces as a normal exec failure for Developer DEBUG.
+    """
     if not text or not text.strip():
         return None
-    m = re.search(r"```(?:python|py)?\s*(.*?)```", text, re.DOTALL)
-    if m:
-        return m.group(1).strip() or None
-    return text.strip()
+    candidate = _strip_fence(text)
+    if not candidate:
+        return None
+
+    # 1. Normal: already valid Python (but not a JSON object masquerading as a
+    #    dict literal — those compile yet aren't the intended code).
+    if candidate[0] not in '{["' and _compiles(candidate):
+        return candidate
+
+    # 2. Model wrapped the code in JSON ({"code": ...} or a JSON string).
+    unwrapped = _unwrap_json_code(candidate)
+    if unwrapped is not None:
+        return unwrapped
+
+    # 3. Code arrived with literal \n escapes (e.g. escaped inside a fence) and
+    #    won't compile — decode the escapes if that produces valid Python.
+    if "\\n" in candidate and not _compiles(candidate):
+        try:
+            decoded = candidate.encode("utf-8").decode("unicode_escape")
+        except (UnicodeDecodeError, ValueError):
+            decoded = candidate
+        if _compiles(decoded):
+            return decoded
+
+    return candidate
 
 
-def _header(header_vars: dict[str, Any]) -> str:
+def _header(header_vars: dict[str, Any], *, helpers: str = "") -> str:
     """Render predefined variables the authored code may use, safely quoted."""
     lines = [
         "# --- injected by maads; do not redefine ---",
@@ -58,6 +197,8 @@ def _header(header_vars: dict[str, Any]) -> str:
     ]
     for name, value in header_vars.items():
         lines.append(f"{name} = {value!r}")
+    if helpers.strip():
+        lines.append(helpers.strip())
     return "\n".join(lines) + "\n"
 
 
@@ -111,6 +252,7 @@ def run_authored_code(
     header_vars: dict[str, Any],
     contract: Contract,
     contract_hint: str = "",
+    header_helpers: str = "",
     fallback: Callable[[], dict] | None = None,
     fallback_code: str = "<fixed baseline snippet>",
     max_retries: int = MAX_CODE_RETRIES,
@@ -122,20 +264,43 @@ def run_authored_code(
     `contract` validates the JSON the code prints. `fallback` (if given) runs the
     fixed baseline when all authoring attempts fail.
     """
-    header = _header(header_vars)
+    header = _header(header_vars, helpers=header_helpers)
+    if header_helpers.strip():
+        instruction = (
+            f"{instruction} Use injected helpers drop_feature_columns(df) and "
+            "text_vectorizer_pipeline(**kwargs) when building text pipelines."
+        )
     prior_code: str | None = None
     prior_error: str | None = None
     last_exec: ExecResult | None = None
+    attempt_budget = min(
+        max_retries,
+        code_retries(soft=soft_limit_reached(state)),
+    )
+    if attempt_budget <= 0:
+        attempt_budget = 1
 
-    for attempt in range(1, max_retries + 1):
+    for attempt in range(1, attempt_budget + 1):
         prompt = _build_instruction(
             instruction, header_vars, contract_hint, prior_code, prior_error
         )
         try:
             raw = crew.run_text_task(agent_name, prompt, state, expected_output="A Python code block.")
+        except TokenBudgetExceeded:
+            raise
         except (crew.CrewKickoffError, RuntimeError) as exc:
             prior_error = f"LLM call failed: {exc}"
             state.append_log(agent_name, f"authored code attempt {attempt} -> LLM error", level="warn")
+            continue
+
+        blocked = _codegen_response_blocked(raw)
+        if blocked:
+            prior_error = blocked
+            state.append_log(
+                agent_name,
+                f"authored code attempt {attempt} -> blocked by JSON response conflict",
+                level="warn",
+            )
             continue
 
         code = _extract_code(raw)
@@ -171,7 +336,7 @@ def run_authored_code(
         return CodeResult(payload=payload, code=full_code, attempts=attempt)
 
     # Specialist retries exhausted — route to Developer DEBUG before baseline fallback.
-    if prior_code and artifact_dir is not None:
+    if prior_code and artifact_dir is not None and repairs_allowed(state):
         from maads.debug import debug_python_exec
 
         debug_out = debug_python_exec(

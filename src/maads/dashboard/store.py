@@ -32,29 +32,37 @@ def list_cases(artifact_root: Path) -> list[dict[str, Any]]:
             payload = json.loads(status_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        cases.append(_case_summary(child.name, run_dir, payload))
+        summary = _case_summary(child.name, run_dir, payload)
+        runs_dir = child / "runs"
+        summary["run_count"] = (
+            sum(1 for p in runs_dir.iterdir() if p.is_dir())
+            if runs_dir.is_dir()
+            else 0
+        )
+        cases.append(summary)
     return cases
 
 
-def _case_summary(case_id: str, artifact_dir: Path, status: dict[str, Any]) -> dict[str, Any]:
-    paths = RunPaths(artifact_dir)
-    trace_path = paths.trace_json()
-    ended_at: str | None = None
+def _run_status(artifact_dir: Path, status: dict[str, Any]) -> str:
+    """Derive run status (running/complete/halted) from status.json + trace."""
+    if bool(status.get("halted")):
+        return "halted"
+    trace_path = RunPaths(artifact_dir).trace_json()
     if trace_path.is_file():
         try:
             trace = json.loads(trace_path.read_text(encoding="utf-8"))
-            ended_at = trace.get("ended_at")
+            if trace.get("ended_at"):
+                return "complete"
         except (json.JSONDecodeError, OSError):
             pass
-    halted = bool(status.get("halted"))
-    if halted:
-        run_status = "halted"
-    elif ended_at:
-        run_status = "complete"
-    else:
-        run_status = "running"
+    return "running"
+
+
+def _case_summary(case_id: str, artifact_dir: Path, status: dict[str, Any]) -> dict[str, Any]:
+    run_status = _run_status(artifact_dir, status)
     progress = status.get("progress") if isinstance(status.get("progress"), dict) else {}
     completed = progress.get("completed_substeps", status.get("completed_substeps"))
+    model = load_manifest(artifact_dir).get("model")
     return {
         "case_id": case_id,
         "artifact_dir": str(artifact_dir.resolve()),
@@ -64,11 +72,17 @@ def _case_summary(case_id: str, artifact_dir: Path, status: dict[str, Any]) -> d
         "phase_name": status.get("phase_name"),
         "completed_substeps": completed,
         "total_substeps": status.get("total_substeps"),
+        "model": model,
     }
 
 
-def case_dir(artifact_root: Path, case_id: str) -> Path:
+def case_dir(artifact_root: Path, case_id: str, run_id: str | None = None) -> Path:
     case_path = artifact_root / case_id
+    if run_id:
+        run_dir = case_path / "runs" / run_id
+        if run_dir.is_dir():
+            return run_dir
+        raise FileNotFoundError(f"Run not found: {case_id}/{run_id}")
     run_dir = resolve_active_run_dir(case_path)
     if run_dir is None:
         raise FileNotFoundError(f"Case not found: {case_id}")
@@ -236,17 +250,36 @@ def read_report_text(artifact_dir: Path, name: str) -> str:
 
 
 def list_runs(case_root_path: Path) -> list[dict[str, Any]]:
-    index_path = case_root_path / "runs_index.json"
-    if index_path.is_file():
-        try:
-            raw = json.loads(index_path.read_text(encoding="utf-8"))
-            return list(raw.get("runs") or [])
-        except (json.JSONDecodeError, OSError):
-            pass
+    """List every run dir under ``runs/`` with its model + derived status.
+
+    Always scans the filesystem rather than trusting ``runs_index.json`` (which
+    is written read-modify-write at run end and can lose an entry when two
+    same-case runs finish concurrently).
+    """
     runs: list[dict[str, Any]] = []
     runs_dir = case_root_path / "runs"
-    if runs_dir.is_dir():
-        for child in sorted(runs_dir.iterdir(), reverse=True):
-            if child.is_dir():
-                runs.append({"run_id": child.name, "artifact_dir": str(child)})
+    if not runs_dir.is_dir():
+        return runs
+    for child in runs_dir.iterdir():
+        if not child.is_dir():
+            continue
+        manifest = load_manifest(child)
+        status: dict[str, Any] = {}
+        status_path = child / "status.json"
+        if not status_path.is_file():
+            status_path = RunPaths(child).derived / "status.json"
+        if status_path.is_file():
+            try:
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                status = {}
+        runs.append({
+            "run_id": child.name,
+            "artifact_dir": str(child),
+            "model": manifest.get("model"),
+            "status": _run_status(child, status),
+            "started_at": manifest.get("started_at"),
+            "ended_at": manifest.get("ended_at"),
+        })
+    runs.sort(key=lambda r: r.get("started_at") or "", reverse=True)
     return runs

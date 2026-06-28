@@ -22,6 +22,8 @@ from dotenv import load_dotenv
 from maads.artifact_runs import case_root, prepare_run_dir
 from maads.artifact_paths import ensure_run_layout
 from maads.knowledge_setup import repo_root
+from maads.model_capabilities import log_model_capabilities
+from maads.model_info import log_selected_model_info
 from maads.rag import ensure_embedding_model_available
 
 from maads.config import load_case_config, kickoff_inputs
@@ -33,6 +35,35 @@ from maads.run_status import bind_run, flush_status
 from maads.shutdown import apply_interrupt_to_state, install_sigint_handler, shutdown_requested
 from maads.outcome import ml_outcome_deficits, ml_run_succeeded, workflow_complete
 from maads.state import CrispDMState
+
+
+def _persist_run_outcome(
+    state: CrispDMState,
+    artifact_dir: Path,
+    case_dir: Path,
+) -> tuple[Path, "RunPaths"]:
+    """Write final state and reports; safe to call from ``finally``."""
+    from maads.artifact_paths import RunPaths
+    from maads.dashboard.store import read_communications
+    from maads.observability.collector import get_collector
+    from maads.reports import write_run_reports
+
+    state_path = artifact_dir / "final_state.json"
+    state_path.write_text(state.model_dump_json(indent=2))
+    paths = RunPaths(artifact_dir)
+    try:
+        trace = get_collector().to_trace_run()
+        comms = read_communications(artifact_dir)
+        write_run_reports(
+            state,
+            artifact_dir,
+            trace=trace,
+            communications=comms,
+            case_root=case_dir,
+        )
+    except Exception as exc:
+        print(f"WARNING: report generation failed: {exc}", file=sys.stderr)
+    return state_path, paths
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,6 +89,12 @@ def main(argv: list[str] | None = None) -> int:
                             "are kept under artifacts/<case_id>/archive/.")
     p_run.add_argument("--quiet", "-q", action="store_true",
                        help="Disable live progress output (also MAADS_PROGRESS=0).")
+    p_run.add_argument("--model", default=None,
+                       help="Override the MODEL env for this run "
+                            "(e.g. ollama/gpt-oss:120b-cloud, gpt-4o). "
+                            "Recorded in the run manifest.")
+    p_run.add_argument("--max-tokens", type=int, default=None,
+                       help="Override MAX_TOKENS_PER_RUN for this run (hard token cap).")
 
     # ── data ───────────────────────────────────────────────────────────
     p_data = sub.add_parser("data", help="Data utilities.")
@@ -118,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
         p_data.print_help()
         return 0
 
+    log_model_capabilities()
+
     if args.cmd == "run":
         return cmd_run(args)
     if args.cmd == "flow" and args.flow_cmd == "plot":
@@ -143,6 +182,18 @@ def cmd_run(args: argparse.Namespace) -> int:
     import os
 
     os.chdir(repo_root())
+    # Set MODEL before the embedding probe and manifest write so both see the
+    # UI/CLI-selected model. load_dotenv ran earlier with override=False, so it
+    # will not clobber this. MAADS_MODEL_OVERRIDE makes the chosen model
+    # authoritative for every agent, beating any per-role MODEL_* in .env.
+    model_arg = (getattr(args, "model", None) or "").strip()
+    if model_arg:
+        os.environ["MODEL"] = model_arg
+        os.environ["MAADS_MODEL_OVERRIDE"] = model_arg
+        log_selected_model_info(model_arg)
+    max_tokens_arg = getattr(args, "max_tokens", None)
+    if max_tokens_arg is not None:
+        os.environ["MAX_TOKENS_PER_RUN"] = str(max_tokens_arg)
     embed_warn = ensure_embedding_model_available()
     if embed_warn:
         print(f"WARNING: {embed_warn}", file=sys.stderr)
@@ -164,12 +215,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     case_dir = case_root(resolve_path(args.artifact_dir), config.case_id)
     run_id = str(uuid.uuid4())
     artifact_dir = prepare_run_dir(case_dir, run_id)
-    ensure_run_layout(artifact_dir, run_id=run_id, case_id=config.case_id)
+    ensure_run_layout(artifact_dir, run_id=run_id, case_id=config.case_id,
+                      model=os.environ.get("MODEL"))
 
-    os.environ.setdefault(
-        "CREWAI_STORAGE_DIR",
-        str((artifact_dir / "crewai_storage").resolve()),
-    )
+    # Unconditional per-run assignment: concurrent runs of the same case must not
+    # share one CrewAI store, so do not honour an inherited CREWAI_STORAGE_DIR.
+    os.environ["CREWAI_STORAGE_DIR"] = str((artifact_dir / "crewai_storage").resolve())
 
     inputs = kickoff_inputs(config)
     (artifact_dir / "kickoff_inputs.json").write_text(
@@ -192,10 +243,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     begin_run(config.case_id, artifact_dir, run_id=run_id)
     halt_reason: str | None = None
     interrupted = False
+    run_failed = False
+    state_path: Path | None = None
+    paths = None
     try:
         from maads.flow.crisp_dm_flow import CrispDMFlow
 
         state = CrispDMFlow(state, artifact_dir).run()
+        if not state.halted and not workflow_complete(state):
+            from maads.flow.phase_runner import force_halt
+
+            force_halt(state, "flow ended before workflow completion")
         if shutdown_requested() and not state.halted:
             halt_reason = apply_interrupt_to_state(state)
             interrupted = True
@@ -205,29 +263,19 @@ def cmd_run(args: argparse.Namespace) -> int:
         halt_reason = apply_interrupt_to_state(state)
         interrupted = True
         print("\nForced quit.", file=sys.stderr)
+    except Exception as exc:
+        run_failed = True
+        if not state.halted:
+            from maads.flow.phase_runner import force_halt
+
+            force_halt(state, f"run failed: {type(exc).__name__}: {exc}")
+        halt_reason = state.halt_reason
+        print(f"\nRun failed: {exc}", file=sys.stderr)
     finally:
         flush_status()
         end_run(artifact_dir)
         stop_progress(halt_reason, ml_success=ml_run_succeeded(state))
-
-    state_path = artifact_dir / "final_state.json"
-    state_path.write_text(state.model_dump_json(indent=2))
-
-    from maads.artifact_paths import RunPaths
-    from maads.dashboard.store import read_communications
-    from maads.observability.collector import get_collector
-    from maads.reports import write_run_reports
-
-    paths = RunPaths(artifact_dir)
-    trace = get_collector().to_trace_run()
-    comms = read_communications(artifact_dir)
-    write_run_reports(
-        state,
-        artifact_dir,
-        trace=trace,
-        communications=comms,
-        case_root=case_dir,
-    )
+        state_path, paths = _persist_run_outcome(state, artifact_dir, case_dir)
 
     print(f"Halted: {state.halt_reason}")
     print(f"Workflow: {'complete' if workflow_complete(state) else 'incomplete'}")
@@ -243,6 +291,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"Reports:     {paths.reports}/")
     if interrupted:
         return 130
+    if run_failed:
+        return 1
     return 0 if ml_run_succeeded(state) else 1
 
 

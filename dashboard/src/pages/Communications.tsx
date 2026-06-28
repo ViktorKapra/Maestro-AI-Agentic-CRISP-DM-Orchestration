@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CommTurn } from "../components/CommTurn";
+import { Loading } from "../components/Loading";
 import { useCommunications } from "../hooks/useCasePolling";
 import { useTheme } from "../shared/theme";
 
@@ -10,7 +11,9 @@ interface Props {
 
 export function Communications({ caseId, highlightCommId }: Props) {
   const { clean } = useTheme();
-  const { data: communications } = useCommunications(caseId, { limit: 200 });
+  const { data: communications, isLoading } = useCommunications(caseId, {
+    limit: 200,
+  });
   const [selected, setSelected] = useState<string | null>(
     highlightCommId ?? null,
   );
@@ -23,7 +26,9 @@ export function Communications({ caseId, highlightCommId }: Props) {
         {clean("🔒 Contains full system prompts and LLM responses — local use only, keep it secret bestie! 🤫")}
       </div>
 
-      {!communications?.length && (
+      {isLoading && !communications && <Loading label="Loading communications…" />}
+
+      {!isLoading && !communications?.length && (
         <p className="text-slate-500 text-sm">{clean("🫧 No LLM communications yet…")}</p>
       )}
 

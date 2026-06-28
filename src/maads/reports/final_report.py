@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from maads.reports.md_paths import md_file_link, relative_md_path
+from maads.reports.report_format import (
+    format_confusion_matrix,
+    format_distribution,
+    format_report_value,
+)
 from maads.state import CrispDMState
 from maads.success_criterion import assessment_meets
 
@@ -111,9 +116,9 @@ def render_final_report_md(
         meets = assessment_meets(assessment)
         score = assessment.get("achieved_score", assessment.get("cv_score", "n/a"))
         lines.extend([
-            f"- **Success criterion met:** {meets}",
-            f"- **CV score:** {score}",
-            f"- **Threshold:** {assessment.get('threshold', 'n/a')}",
+            f"- **Success criterion met:** {'yes' if meets else 'no'}",
+            f"- **CV score:** {format_report_value(score) or 'n/a'}",
+            f"- **Threshold:** {format_report_value(assessment.get('threshold')) or 'n/a'}",
             "",
         ])
 
@@ -128,10 +133,16 @@ def render_final_report_md(
 
     explore = state.du.data_exploration_report or {}
     if explore.get("target_distribution"):
+        class_labels = dict(state.config.class_labels)
+        if bundle and bundle.class_labels:
+            class_labels.update(bundle.class_labels)
         lines.extend([
             "**Target distribution:**",
             "",
-            str(explore["target_distribution"]),
+            format_distribution(
+                explore["target_distribution"],
+                class_labels=class_labels or None,
+            ),
             "",
         ])
 
@@ -156,7 +167,10 @@ def render_final_report_md(
         lines.extend([
             "**Confusion matrix (out-of-fold):**",
             "",
-            str(bundle.confusion_matrix),
+            format_confusion_matrix(
+                bundle.confusion_matrix,
+                class_labels=bundle.class_labels or dict(state.config.class_labels),
+            ),
             "",
         ])
     lines.extend([

@@ -14,6 +14,8 @@ from maads.reports.md_paths import md_file_link
 from maads.reports.postmortem import _sandbox_stats
 from maads.state import CrispDMState
 from maads.success_criterion import assessment_meets, criterion_direction
+from maads.reports.report_format import format_token_spend
+from maads.token_budget import build_spending_summary, format_spending_lines
 
 
 def _sandbox_failures(paths: RunPaths) -> list[dict[str, Any]]:
@@ -105,6 +107,7 @@ def build_execution_analysis(
         "decision": state.ev.decision,
         "chosen_model": model_block,
         "token_spend": dict(state.token_spend),
+        "spending_summary": build_spending_summary(state),
         "llm_turns": comm_summary.get("turn_count", 0),
         "sandbox": _sandbox_stats(paths),
         "sandbox_failures": _sandbox_failures(paths),
@@ -170,9 +173,13 @@ def render_execution_analysis_md(
         f"- **Duration (ms):** {bundle.get('duration_ms', 'n/a')}",
         f"- **Halt reason:** {bundle.get('halt_reason', 'n/a')}",
         f"- **LLM turns:** {bundle.get('llm_turns', 0)}",
-        f"- **Token spend:** {bundle.get('token_spend', {})}",
-        "",
     ])
+    spending = bundle.get("spending_summary")
+    if spending:
+        lines.extend(format_spending_lines(spending))
+    else:
+        lines.extend(format_token_spend(bundle.get("token_spend")))
+    lines.append("")
 
     sandbox = bundle.get("sandbox") or {}
     lines.extend([

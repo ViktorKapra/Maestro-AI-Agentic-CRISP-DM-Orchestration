@@ -9,6 +9,43 @@ export interface CaseSummary {
   phase_name?: string;
   completed_substeps?: number;
   total_substeps?: number;
+  model?: string | null;
+  run_count?: number;
+}
+
+export interface RunSummary {
+  run_id: string;
+  artifact_dir?: string;
+  model?: string | null;
+  status: RunStatus;
+  started_at?: string | null;
+  ended_at?: string | null;
+}
+
+export interface ModelOption {
+  id: string;
+  label: string;
+}
+
+export interface ModelCatalog {
+  ollama_cloud: ModelOption[];
+  openai: ModelOption[];
+}
+
+export interface ModelJsonCapabilities {
+  mode: "none" | "json_mode" | "structured_outputs";
+  structured_outputs: boolean;
+  json_mode: boolean;
+}
+
+export interface ModelInfo {
+  model: string;
+  label?: string | null;
+  provider: "ollama" | "openai" | null;
+  available: boolean;
+  error: string | null;
+  details: Record<string, unknown>;
+  json_capabilities: ModelJsonCapabilities | null;
 }
 
 export interface StatusPayload {
@@ -70,6 +107,7 @@ export interface CommunicationRecord {
     json_valid?: boolean;
     schema_ok?: boolean;
     schema_errors?: string[];
+    response_shape?: string;
     repair?: {
       kind?: string;
       requesting_agent?: string;
@@ -121,7 +159,37 @@ export interface GraphPayload {
   edges: FlowEdge[];
 }
 
-export type TabId = "overview" | "process" | "state" | "communications" | "architecture" | "timeline" | "knowledge" | "framework" | "prompts" | "state_shape" | "loop_logic" | "failure_modes" | "launch";
+export interface RunResult {
+  run_id: string;
+  llm_model: string;
+  status: string;
+  started_at: string | null;
+  chosen_model: string | null;
+  chosen_params: Record<string, unknown>;
+  modeling_technique: string | null;
+  data_prep: string | null;
+  derived_features: string[];
+  derived_summary: string | null;
+  missing_summary: string | null;
+  problem_type: string | null;
+  score: number | null;
+  cv_score: number | null;
+  holdout_score: number | null;
+  score_metric: string | null;
+  success_threshold: number | null;
+  meets_threshold: boolean | null;
+  metrics: Record<string, number>;
+  confusion_matrix: number[][] | null;
+  class_labels: Record<string, string>;
+  ml_success: boolean | null;
+  workflow_complete: boolean | null;
+  halt_reason: string | null;
+  total_tokens: number | null;
+  insight?: { summary: string; flags: string[] };
+  badges?: string[];
+}
+
+export type TabId = "home" | "overview" | "process" | "inspect" | "results" | "state" | "communications" | "architecture" | "framework" | "prompts" | "state_shape" | "failure_modes" | "launch";
 
 export interface CaseConfig {
   case_id: string;
@@ -168,6 +236,22 @@ export interface ConclusionHighlight {
   value: string;
 }
 
+export interface TokenBudgetStatus {
+  cap: number | null;
+  spent: number;
+  remaining: number | null;
+  pct: number | null;
+  soft_limit: boolean;
+  soft_limit_pct?: number;
+  halted_by_budget?: boolean;
+  per_agent?: Record<string, {
+    spent: number;
+    cap: number | null;
+    remaining: number | null;
+    over: boolean;
+  }>;
+}
+
 export interface LiveSummary {
   updated_at: string;
   case_id: string;
@@ -188,6 +272,7 @@ export interface LiveSummary {
   ml_deficits?: string[];
   token_spend: Record<string, number>;
   token_spend_by_provider?: Record<string, number>;
+  token_budget?: TokenBudgetStatus;
   elapsed_ms: number | null;
   trace: {
     run_id: string | null;
