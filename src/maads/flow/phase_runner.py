@@ -1,7 +1,6 @@
 """Shared CRISP-DM orchestration primitives for CrispDMFlow."""
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -10,6 +9,13 @@ from maads.deltas import Plan
 from maads.flow.tracing import trace_substep_dispatch, trace_substep_end
 from maads.shutdown import INTERRUPT_HALT_REASON, shutdown_requested
 from maads.state import SUBSTEPS, SUBSTEP_OWNER, CrispDMState, Phase
+from maads.token_budget import (
+    HALT_REASON,
+    TokenBudgetExceeded,
+    budget_status,
+    over_budget,
+    soft_limit_reached,
+)
 from maads.outcome import completion_halt_reason
 from maads.validators import validate_phase_3_artifacts, validate_phase_4_models
 
@@ -70,8 +76,8 @@ def check_global_halt(ctx: RunContext) -> str | None:
         return INTERRUPT_HALT_REASON
     if caps_exceeded(ctx):
         return "hard cap exceeded"
-    if over_token_budget(ctx.state):
-        return "token budget exceeded"
+    if over_budget(ctx.state):
+        return HALT_REASON
     return None
 
 
@@ -242,13 +248,24 @@ def caps_exceeded(ctx: RunContext) -> bool:
 
 
 def over_token_budget(state: CrispDMState) -> bool:
-    cap = os.getenv("MAX_TOKENS_PER_RUN")
-    if not cap:
-        return False
-    try:
-        return sum(state.token_spend.values()) >= int(cap)
-    except (ValueError, TypeError):
-        return False
+    """Back-compat alias for ``token_budget.over_budget``."""
+    return over_budget(state)
+
+
+def maybe_log_soft_limit(ctx: RunContext) -> None:
+    """Log once when spend crosses the soft token budget threshold."""
+    if not soft_limit_reached(ctx.state):
+        return
+    for entry in reversed(ctx.state.log):
+        if entry.agent == "orchestrator" and "token budget soft limit" in entry.message:
+            return
+    status = budget_status(ctx.state)
+    ctx.state.append_log(
+        "orchestrator",
+        f"token budget soft limit reached ({status.get('pct')}% of cap); "
+        "skipping DEBUG repairs and reducing codegen retries",
+        level="warn",
+    )
 
 
 def sync_phase_substep(state: CrispDMState) -> None:
@@ -354,6 +371,7 @@ def run_phase_substeps(ctx: RunContext, phase: Phase) -> str | None:
         if reason:
             force_halt(ctx.state, reason)
             return "halt"
+        maybe_log_soft_limit(ctx)
         if substep in PM_DECISION_SUBSTEPS:
             route = handle_plan(ctx, resolve_plan(ctx))
             if route:
@@ -369,6 +387,9 @@ def run_phase_substeps(ctx: RunContext, phase: Phase) -> str | None:
             if not execute_substep(ctx, substep):
                 force_halt(ctx.state, f"execution failed at {substep}")
                 return "halt"
+        except TokenBudgetExceeded:
+            force_halt(ctx.state, HALT_REASON)
+            return "halt"
         except Exception as exc:
             force_halt(ctx.state, f"dispatch failed at {substep}: {exc}")
             return "halt"

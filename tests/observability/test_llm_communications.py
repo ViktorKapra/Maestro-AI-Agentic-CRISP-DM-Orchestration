@@ -306,3 +306,74 @@ def test_traced_run_json_task_captures_communication(MockCrew, monkeypatch: pyte
     assert records[0].agent_name == "pm"
     assert records[0].outcome["parse_ok"] is True
     assert "task_description" in records[0].maads
+
+
+def _unwrap_traced(fn):
+    while getattr(fn, "_maads_traced", False):
+        fn = fn.__wrapped__
+    return fn
+
+
+def _restore_crew_task_impls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Undo conftest codegen stub and any prior traced wrappers for a fresh patch."""
+    import maads.crew as crew_mod
+
+    monkeypatch.setattr(crew_mod, "run_json_task", _unwrap_traced(crew_mod.run_json_task))
+    monkeypatch.setattr(
+        crew_mod,
+        "run_text_task",
+        lambda agent_name, instruction, state, expected_output="The requested output.": crew_mod._kickoff(
+            agent_name, instruction, state, "", expected_output, json_enforced=False,
+        ),
+    )
+
+
+@patch("maads.crew.Crew")
+def test_traced_run_text_task_records_codegen_shape(MockCrew, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MAADS_TRACE", "1")
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    monkeypatch.setenv("CREWAI_DISABLE_TELEMETRY", "true")
+
+    from maads.config import load_case_config
+    from maads.observability.collector import get_collector, reset_collector
+    from maads.observability.patches import apply_patches
+    from maads.state import CrispDMState
+
+    from maads.paths import repo_root
+
+    repo = repo_root()
+    cfg = load_case_config(repo / "configs" / "titanic.yaml")
+
+    reset_collector()
+    reset_communication_registry()
+    _restore_crew_task_impls(monkeypatch)
+    register_listener = __import__(
+        "maads.observability.crewai_listener", fromlist=["register_crewai_listener"]
+    ).register_crewai_listener
+    register_listener()
+    apply_patches()
+
+    code_json = '{"code": "import json\\nprint(json.dumps({\\"n\\": 1}))"}'
+    mock_output = MagicMock()
+    mock_output.token_usage.total_tokens = 17
+    mock_output.__str__ = lambda self: code_json
+    MockCrew.return_value.kickoff.return_value = mock_output
+
+    state = CrispDMState.from_config(cfg)
+    state.substep = "4.3"
+    get_collector().start_run("titanic")
+
+    import maads.crew as crew_mod
+
+    result = crew_mod.run_text_task("data_scientist", "write code", state)
+    assert result == code_json
+
+    from maads.observability.llm_communications import get_communication_registry
+
+    records = get_communication_registry().all_records()
+    assert len(records) == 1
+    outcome = records[0].outcome
+    assert outcome["response_shape"] == "json_code_wrapper"
+    assert outcome["json_valid"] is True
+    assert outcome["parse_ok"] is True
+    assert outcome["parsed_json"] is not None

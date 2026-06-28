@@ -8,6 +8,7 @@ import {
   fetchGraph,
   fetchLiveSummary,
   fetchModels,
+  fetchModelInfo,
   fetchProcess,
   fetchRag,
   fetchState,
@@ -146,5 +147,13 @@ export function useModels() {
   return useQuery({
     queryKey: ["models"],
     queryFn: fetchModels,
+  });
+}
+
+export function useModelInfo(model: string | null) {
+  return useQuery({
+    queryKey: ["modelInfo", model ?? "default"],
+    queryFn: () => fetchModelInfo(model ?? undefined),
+    enabled: true,
   });
 }

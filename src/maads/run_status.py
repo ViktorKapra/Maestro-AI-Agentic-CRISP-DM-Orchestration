@@ -19,6 +19,7 @@ from maads.state import (
     _pm_outputs_status,
     _trim_log,
 )
+from maads.token_budget import budget_status
 
 TOTAL_SUBSTEPS = sum(len(v) for v in SUBSTEPS.values())
 
@@ -81,6 +82,7 @@ def flush_status() -> None:
         "total_substeps": TOTAL_SUBSTEPS,
         "token_spend": dict(state.token_spend),
         "token_spend_by_provider": dict(state.token_spend_by_provider),
+        "token_budget": budget_status(state),
         "halted": state.halted,
         "halt_reason": state.halt_reason,
         "workflow_complete": workflow_complete(state),
@@ -161,9 +163,19 @@ def _format_md(payload: dict[str, Any]) -> str:
             f"/{payload.get('total_substeps', TOTAL_SUBSTEPS)} substeps"
         ),
         f"- **Tokens:** {total_tokens} {dict(tokens) if tokens else ''}",
+    ]
+    budget = payload.get("token_budget") or {}
+    if budget.get("cap") is not None:
+        lines.append(
+            f"- **Token budget:** {budget.get('spent', 0)}/{budget.get('cap')} "
+            f"({budget.get('pct', '?')}%, remaining {budget.get('remaining', '?')})"
+        )
+        if budget.get("soft_limit"):
+            lines.append("- **Token soft limit:** active (DEBUG repairs degraded)")
+    lines.extend([
         f"- **Artifacts:** `{payload.get('artifact_dir', '')}`",
         f"- **Trace:** `{payload.get('trace_dir', '')}`",
-    ]
+    ])
     if payload.get("halted"):
         lines.append(f"- **Halted:** {payload.get('halt_reason', '')}")
     if payload.get("workflow_complete") is not None:

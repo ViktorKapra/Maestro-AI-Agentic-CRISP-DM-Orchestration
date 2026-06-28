@@ -26,6 +26,7 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
   const jsonValid = record.outcome?.json_valid;
   const schemaOk = record.outcome?.schema_ok;
   const schemaErrors = record.outcome?.schema_errors;
+  const responseShape = record.outcome?.response_shape;
   const failed = parseOk === false;
   const schemaOnlyFailure =
     jsonValid === true && schemaOk === false;
@@ -57,6 +58,9 @@ export function CommTurn({ record, highlighted, onSelect }: Props) {
         )}
         {record.substep && (
           <span className="text-xs text-slate-500">§{record.substep}</span>
+        )}
+        {responseShape && (
+          <span className="text-xs text-slate-500">{responseShape}</span>
         )}
         {failed && (
           <span className="rounded-full bg-rose-100 text-rose-700 border border-rose-300 px-2 py-0.5 text-xs font-semibold">

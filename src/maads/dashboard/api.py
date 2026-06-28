@@ -349,6 +349,38 @@ def get_final_report_md(case_id: str, run_id: str | None = Query(None)) -> str:
     return path.read_text(encoding="utf-8")
 
 
+@router.get("/cases/{case_id}/artifacts/{artifact_path:path}")
+def get_run_artifact(
+    case_id: str,
+    artifact_path: str,
+    run_id: str | None = Query(None),
+) -> FileResponse:
+    """Serve a file from a run directory (e.g. figures for report rendering)."""
+    import mimetypes
+
+    from maads.artifact_paths import RunPaths
+    from maads.reports.md_paths import resolve_artifact_path
+
+    try:
+        artifact_dir = store.case_dir(_artifact_root(), case_id, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    run_dir = RunPaths(artifact_dir).run_dir.resolve()
+    resolved = resolve_artifact_path(artifact_path, run_dir)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    try:
+        resolved.relative_to(run_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="artifact not found") from exc
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    media_type, _ = mimetypes.guess_type(resolved.name)
+    return FileResponse(resolved, media_type=media_type or "application/octet-stream")
+
+
 @router.get("/cases/{case_id}/reports/improvement_bundle")
 def get_improvement_bundle(case_id: str, run_id: str | None = Query(None)) -> dict[str, Any]:
     try:
@@ -535,6 +567,24 @@ def list_models() -> dict[str, list[dict[str, str]]]:
     from maads.model_catalog import model_catalog
 
     return model_catalog()
+
+
+@router.get("/models/info")
+def model_info(
+    model: str | None = Query(default=None, description="Model id; omit for MODEL from .env"),
+    probe: bool = Query(default=False, description="Live-probe JSON capabilities (may cost tokens)"),
+) -> dict[str, Any]:
+    """Return provider metadata for a selectable model."""
+    from maads.model_catalog import model_label
+    from maads.model_info import fetch_model_info
+
+    payload = fetch_model_info(model or "", probe=probe)
+    mid = payload.get("model") or ""
+    if mid:
+        label = model_label(mid)
+        if label:
+            payload["label"] = label
+    return payload
 
 
 class RunRequest(BaseModel):

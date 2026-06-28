@@ -8,7 +8,7 @@ import pytest
 
 from maads.agents import Plan
 from maads.config import load_case_config
-from maads.crew import _check_token_budget
+from maads.token_budget import TokenBudgetExceeded, check_after_spend
 from maads.flow import phase_runner as pr
 from maads.flow.phase_runner import PM_DECISION_SUBSTEPS, advance_substep
 from maads.paths import repo_root, resolve_path
@@ -91,8 +91,8 @@ def test_token_budget_raises_when_exceeded(
 ):
     monkeypatch.setenv("MAX_TOKENS_PER_RUN", "100")
     titanic_state.token_spend["pm"] = 100
-    with pytest.raises(RuntimeError, match="token cap"):
-        _check_token_budget(titanic_state)
+    with pytest.raises(TokenBudgetExceeded, match="token cap"):
+        check_after_spend(titanic_state, "pm")
 
 
 @patch("maads.agents.run_json_task")

@@ -151,6 +151,7 @@ export function Overview({ caseId }: Props) {
         <TokenChart
           summary={summary}
           tokenSpend={live?.token_spend}
+          tokenBudget={live?.token_budget}
         />
       </section>
 

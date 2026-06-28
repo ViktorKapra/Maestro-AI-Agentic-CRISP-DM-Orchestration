@@ -40,3 +40,12 @@ def model_catalog() -> dict[str, list[dict[str, str]]]:
         "ollama_cloud": list(OLLAMA_CLOUD_MODELS),
         "openai": list(OPENAI_MODELS),
     }
+
+
+def model_label(model_id: str) -> str | None:
+    """Return the curated display label for ``model_id``, if known."""
+    for group in model_catalog().values():
+        for entry in group:
+            if entry["id"] == model_id:
+                return entry["label"]
+    return None

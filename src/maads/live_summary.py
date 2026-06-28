@@ -8,6 +8,7 @@ from maads.observability.collector import get_collector
 from maads.observability.llm_communications import get_communication_registry
 from maads.outcome import ml_outcome_deficits, ml_run_succeeded, workflow_complete
 from maads.state import SUBSTEP_NAMES, SUBSTEPS, CrispDMState, Phase
+from maads.token_budget import budget_status
 
 TOTAL_SUBSTEPS = sum(len(v) for v in SUBSTEPS.values())
 
@@ -108,6 +109,7 @@ def build_live_summary(
         "ml_deficits": ml_outcome_deficits(state),
         "token_spend": dict(state.token_spend),
         "token_spend_by_provider": dict(state.token_spend_by_provider),
+        "token_budget": budget_status(state),
         "elapsed_ms": _elapsed_ms(),
         "trace": {
             "run_id": run.run_id if run else None,

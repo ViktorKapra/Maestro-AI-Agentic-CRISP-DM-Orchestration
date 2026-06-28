@@ -35,6 +35,12 @@ from maads.prompts import (
     JSON_EXPECTED_OUTPUT,
 )
 from maads.state import CrispDMState
+from maads.token_budget import (
+    TokenBudgetExceeded,
+    assert_can_spend,
+    check_after_spend,
+    repairs_allowed,
+)
 
 __all__ = [
     "build_llm",
@@ -184,30 +190,18 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
-def _check_token_budget(state: CrispDMState) -> None:
-    cap = os.getenv("MAX_TOKENS_PER_RUN")
-    if not cap:
-        return
-    try:
-        limit = int(cap)
-    except ValueError:
-        return
-    if sum(state.token_spend.values()) >= limit:
-        raise RuntimeError(
-            f"Run-wide token cap of {cap} reached. Halting to avoid runaway cost."
-        )
-
-
 def build_task_description(
     agent_name: str,
     instruction: str,
     state: CrispDMState,
     schema_hint: str = "",
+    *,
+    json_enforced: bool = True,
 ) -> tuple[str, str, Agent]:
     """Assemble the CrewAI Task description; returns (description, state_view_json, agent)."""
     view = state.view_for(agent_name)
     dataset_name = state.case_id if agent_name == "domain" else ""
-    agent = agent_for(agent_name, dataset_name)
+    agent = agent_for(agent_name, dataset_name, json_enforced=json_enforced)
     state_view = json.dumps(view, default=str, ensure_ascii=False)
     template_kind = AGENT_TASK_TEMPLATES.get(agent_name, "substep_json")
     description = compile_task_payload(
@@ -239,6 +233,8 @@ def _kickoff(
     state: CrispDMState,
     schema_hint: str,
     expected_output: str,
+    *,
+    json_enforced: bool = True,
 ) -> str:
     """Run one CrewAI task and return its raw string output.
 
@@ -247,10 +243,11 @@ def _kickoff(
 
     Raises:
         CrewKickoffError: when CrewAI kickoff fails.
-        RuntimeError: when MAX_TOKENS_PER_RUN is exceeded after the call.
+        TokenBudgetExceeded: when MAX_TOKENS_PER_RUN or per-agent cap is exceeded.
     """
+    assert_can_spend(state, agent_name)
     description, _state_view, agent = build_task_description(
-        agent_name, instruction, state, schema_hint
+        agent_name, instruction, state, schema_hint, json_enforced=json_enforced,
     )
     task = Task(description=description, expected_output=expected_output, agent=agent)
     crew = Crew(agents=[agent], tasks=[task], verbose=False)
@@ -275,7 +272,7 @@ def _kickoff(
             state.add_tokens(agent_name, total_tokens, provider=provider)
     except (AttributeError, TypeError, ValueError):
         pass
-    _check_token_budget(state)
+    check_after_spend(state, agent_name)
     return raw_output
 
 
@@ -291,7 +288,7 @@ def run_json_task(
 
     Raises:
         CrewKickoffError: when kickoff fails or the output is not JSON/schema-valid.
-        RuntimeError: when MAX_TOKENS_PER_RUN is exceeded after the call.
+        TokenBudgetExceeded: when MAX_TOKENS_PER_RUN or per-agent cap is exceeded.
     """
     from maads.output_contracts import validate_agent_output
 
@@ -305,6 +302,7 @@ def run_json_task(
     raw_output = _kickoff(
         agent_name, instruction, state, schema_hint,
         expected_output=JSON_EXPECTED_OUTPUT,
+        json_enforced=True,
     )
     parsed = _extract_json(raw_output)
     json_valid = parsed is not None
@@ -336,7 +334,7 @@ def run_json_task(
         errors = _set_meta(payload=parsed)
         if not errors:
             return parsed
-        if artifact_dir is not None:
+        if artifact_dir is not None and repairs_allowed(state):
             from maads.debug import debug_json_parse
 
             outcome = debug_json_parse(
@@ -357,6 +355,11 @@ def run_json_task(
                 )
                 if not repair_errors:
                     return outcome.payload
+        elif artifact_dir is not None:
+            raise CrewKickoffError(
+                f"CrewAI returned schema-invalid JSON for {agent_name} "
+                f"at substep {state.substep}; DEBUG skipped (token budget soft limit or cap)"
+            )
         schema_errors = _last_json_task_meta.get() or {}
         detail = "; ".join(schema_errors.get("schema_errors", errors)[:5])
         raise CrewKickoffError(
@@ -365,7 +368,7 @@ def run_json_task(
         )
 
     if raw_output.strip():
-        if artifact_dir is not None:
+        if artifact_dir is not None and repairs_allowed(state):
             from maads.debug import debug_json_parse
 
             outcome = debug_json_parse(
@@ -385,6 +388,11 @@ def run_json_task(
                 )
                 if not repair_errors:
                     return outcome.payload
+        elif artifact_dir is not None:
+            raise CrewKickoffError(
+                f"CrewAI returned non-JSON output for {agent_name} at substep "
+                f"{state.substep}; DEBUG skipped (token budget soft limit or cap)"
+            )
         _set_meta(payload=None, repair_succeeded=False)
         raise CrewKickoffError(
             f"CrewAI returned non-JSON output for {agent_name} at substep {state.substep}"
@@ -408,6 +416,8 @@ def run_text_task(
 
     Raises:
         CrewKickoffError: when CrewAI kickoff fails.
-        RuntimeError: when MAX_TOKENS_PER_RUN is exceeded after the call.
+        TokenBudgetExceeded: when MAX_TOKENS_PER_RUN or per-agent cap is exceeded.
     """
-    return _kickoff(agent_name, instruction, state, "", expected_output)
+    return _kickoff(
+        agent_name, instruction, state, "", expected_output, json_enforced=False,
+    )

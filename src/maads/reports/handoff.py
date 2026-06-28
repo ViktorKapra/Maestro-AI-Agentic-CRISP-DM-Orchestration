@@ -245,8 +245,8 @@ def render_bundle_workbook_ipynb(
         _cell_code(_bundle_setup_cell_source()),
         _cell_md("### Explore raw training data (optional)\n"),
         _cell_code(_bundle_eda_cell_source()),
-        _cell_md(_canonical_pipeline_markdown(state)),
-        _cell_code(_canonical_pipeline_code(state)),
+        _cell_md(_canonical_pipeline_markdown(state, from_agent_script="4.3" in (context.get("scripts") or {}))),
+        _cell_code(_canonical_pipeline_code(state, context.get("scripts") or {})),
         _cell_md("## Part B — Findings\n\n" + _findings_markdown(state, conclusions)),
         _cell_md(_reference_appendix_md(context, conclusions)),
         _cell_md(

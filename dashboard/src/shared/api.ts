@@ -7,6 +7,7 @@ import type {
   GraphPayload,
   LiveSummary,
   ModelCatalog,
+  ModelInfo,
   ProcessView,
   RagView,
   RunResult,
@@ -107,6 +108,14 @@ export function fetchConfigs(): Promise<CaseConfig[]> {
 
 export function fetchModels(): Promise<ModelCatalog> {
   return fetchJson(`${API}/models`);
+}
+
+export function fetchModelInfo(model?: string, probe = false): Promise<ModelInfo> {
+  const params = new URLSearchParams();
+  if (model) params.set("model", model);
+  if (probe) params.set("probe", "true");
+  const qs = params.toString();
+  return fetchJson(`${API}/models/info${qs ? `?${qs}` : ""}`);
 }
 
 export async function postStartRun(

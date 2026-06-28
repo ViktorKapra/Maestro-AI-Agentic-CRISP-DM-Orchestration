@@ -84,6 +84,41 @@ def test_handoff_zip_structure(tmp_path: Path, config_path: str):
     assert f"{root}/reports/case_report.md" in names
 
 
+def test_bundle_notebook_uses_winning_43_script(tmp_path: Path):
+    cfg = load_case_config(resolve_path("configs/house_prices.yaml"))
+    run_dir = tmp_path / "runs" / "bundle-43"
+    ensure_run_layout(run_dir, run_id="bundle-43", case_id=cfg.case_id)
+    state = _minimal_state("configs/house_prices.yaml", run_dir)
+    paths = RunPaths(run_dir)
+    marker = "# MAADS_HANDOFF_43_MARKER"
+    sandbox_dir = run_dir / "sandbox" / "exec"
+    sandbox_dir.mkdir(parents=True, exist_ok=True)
+    script_name = "00001_data_scientist_attempt1.py"
+    (sandbox_dir / script_name).write_text(
+        "# --- injected by maads; do not redefine ---\n"
+        "import json\nfrom pathlib import Path\nimport pandas as pd\n"
+        f"{marker}\nprint(json.dumps({{'technique': 'xgboost'}}))\n",
+        encoding="utf-8",
+    )
+    manifest = sandbox_dir / "manifest.jsonl"
+    manifest.write_text(
+        json.dumps({
+            "seq": 1,
+            "label": "data_scientist_attempt1",
+            "substep": "4.3",
+            "script": script_name,
+            "ok": True,
+            "return_code": 0,
+        }) + "\n",
+        encoding="utf-8",
+    )
+    context = build_workbook_context(state, paths)
+    notebook = render_bundle_workbook_ipynb(context, state, paths)
+    sources = "".join("".join(c.get("source") or []) for c in notebook["cells"])
+    assert marker in sources
+    assert "successful 4.3 Build Model" in sources
+
+
 def test_bundle_notebook_has_no_repo_dependency(tmp_path: Path):
     cfg = load_case_config(resolve_path("configs/house_prices.yaml"))
     run_dir = tmp_path / "runs" / "bundle-nb"

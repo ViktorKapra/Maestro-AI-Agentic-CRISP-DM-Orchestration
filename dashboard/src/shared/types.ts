@@ -32,6 +32,22 @@ export interface ModelCatalog {
   openai: ModelOption[];
 }
 
+export interface ModelJsonCapabilities {
+  mode: "none" | "json_mode" | "structured_outputs";
+  structured_outputs: boolean;
+  json_mode: boolean;
+}
+
+export interface ModelInfo {
+  model: string;
+  label?: string | null;
+  provider: "ollama" | "openai" | null;
+  available: boolean;
+  error: string | null;
+  details: Record<string, unknown>;
+  json_capabilities: ModelJsonCapabilities | null;
+}
+
 export interface StatusPayload {
   updated_at: string;
   case_id: string;
@@ -91,6 +107,7 @@ export interface CommunicationRecord {
     json_valid?: boolean;
     schema_ok?: boolean;
     schema_errors?: string[];
+    response_shape?: string;
     repair?: {
       kind?: string;
       requesting_agent?: string;
@@ -219,6 +236,22 @@ export interface ConclusionHighlight {
   value: string;
 }
 
+export interface TokenBudgetStatus {
+  cap: number | null;
+  spent: number;
+  remaining: number | null;
+  pct: number | null;
+  soft_limit: boolean;
+  soft_limit_pct?: number;
+  halted_by_budget?: boolean;
+  per_agent?: Record<string, {
+    spent: number;
+    cap: number | null;
+    remaining: number | null;
+    over: boolean;
+  }>;
+}
+
 export interface LiveSummary {
   updated_at: string;
   case_id: string;
@@ -239,6 +272,7 @@ export interface LiveSummary {
   ml_deficits?: string[];
   token_spend: Record<string, number>;
   token_spend_by_provider?: Record<string, number>;
+  token_budget?: TokenBudgetStatus;
   elapsed_ms: number | null;
   trace: {
     run_id: string | null;

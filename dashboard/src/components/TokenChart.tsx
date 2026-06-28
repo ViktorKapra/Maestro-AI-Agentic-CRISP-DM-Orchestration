@@ -4,12 +4,17 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import type { CommunicationRecord, CommunicationsSummary } from "../shared/types";
+import type {
+  CommunicationRecord,
+  CommunicationsSummary,
+  TokenBudgetStatus,
+} from "../shared/types";
 import { useTheme } from "../shared/theme";
 
 // Per-agent bar colours, one cohesive palette per theme.
@@ -68,9 +73,10 @@ interface Props {
   summary: CommunicationsSummary | undefined;
   communications?: CommunicationRecord[] | undefined;
   tokenSpend: Record<string, number> | undefined;
+  tokenBudget?: TokenBudgetStatus;
 }
 
-export function TokenChart({ summary, communications, tokenSpend }: Props) {
+export function TokenChart({ summary, communications, tokenSpend, tokenBudget }: Props) {
   const { theme, clean } = useTheme();
   const palette = AGENT_COLORS[theme];
   const c = CHART_THEME[theme];
@@ -103,6 +109,12 @@ export function TokenChart({ summary, communications, tokenSpend }: Props) {
   const total =
     summary?.total_tokens ??
     Object.values(tokenSpend ?? {}).reduce((a, b) => a + b, 0);
+  const cap = tokenBudget?.cap ?? null;
+  const remaining = tokenBudget?.remaining ?? null;
+  const nearCap = Boolean(
+    tokenBudget?.soft_limit ||
+      (tokenBudget?.pct != null && tokenBudget.pct >= (tokenBudget.soft_limit_pct ?? 90)),
+  );
 
   return (
     <div className="space-y-6">
@@ -110,9 +122,22 @@ export function TokenChart({ summary, communications, tokenSpend }: Props) {
         <p className="text-sm text-slate-400 mb-1 font-semibold">
           {clean("💎 Total tokens")}
         </p>
-        <p className="text-3xl font-bold tabular-nums text-accent">
+        <p
+          className={`text-3xl font-bold tabular-nums ${
+            nearCap ? "text-amber-400" : "text-accent"
+          }`}
+        >
           {total.toLocaleString()}
         </p>
+        {cap != null && (
+          <p className={`text-sm mt-1 ${nearCap ? "text-amber-400/90" : "text-slate-400"}`}>
+            Budget: {total.toLocaleString()} / {cap.toLocaleString()}
+            {remaining != null ? ` (${remaining.toLocaleString()} remaining` : ""}
+            {tokenBudget?.pct != null ? `, ${tokenBudget.pct}%` : ""}
+            {remaining != null ? ")" : ""}
+            {tokenBudget?.soft_limit ? " · soft limit active" : ""}
+          </p>
+        )}
         {summary && (
           <p className="text-xs text-slate-500 mt-1">
             {clean("💌")} {summary.turn_count} LLM turns · avg{" "}
@@ -177,6 +202,19 @@ export function TokenChart({ summary, communications, tokenSpend }: Props) {
                 dot={false}
                 strokeWidth={2}
               />
+              {cap != null && (
+                <ReferenceLine
+                  y={cap}
+                  stroke={nearCap ? "#fbbf24" : "#94a3b8"}
+                  strokeDasharray="4 4"
+                  label={{
+                    value: `cap ${cap.toLocaleString()}`,
+                    fill: nearCap ? "#fbbf24" : c.axis,
+                    fontSize: 10,
+                    position: "insideTopRight",
+                  }}
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>

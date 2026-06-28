@@ -12,6 +12,7 @@ from maads.crew import CrewKickoffError, _extract_json
 from maads.prompts import JSON_EXPECTED_OUTPUT
 from maads.prompts.identities.developer import format_developer_debug_task
 from maads.state import CrispDMState
+from maads.token_budget import TokenBudgetExceeded, debug_retries
 from maads.tools import ExecResult, PythonExec
 
 MAX_DEBUG_RETRIES = 3
@@ -54,6 +55,18 @@ def classify_exec_error(res: ExecResult | None, error_text: str = "") -> str:
 
 
 def _schema_columns(state: CrispDMState) -> list[str]:
+    merged = state.dp.merged_data or {}
+    cols_train = merged.get("columns_train")
+    if isinstance(cols_train, list) and cols_train:
+        return [str(c) for c in cols_train]
+    dataset_train = (state.dp.dataset or {}).get("train")
+    if dataset_train:
+        try:
+            import pandas as pd
+
+            return [str(c) for c in pd.read_parquet(dataset_train).columns]
+        except Exception:
+            pass
     report = state.du.data_description_report or {}
     cols = report.get("columns")
     if isinstance(cols, list):
@@ -80,9 +93,11 @@ def debug_python_exec(
     contract_hint: str,
     last_error: str,
     last_exec: ExecResult | None = None,
-    max_retries: int = MAX_DEBUG_RETRIES,
+    max_retries: int | None = None,
 ) -> DebugOutcome:
     """Developer diagnoses and re-executes failing agent-authored Python."""
+    if max_retries is None:
+        max_retries = debug_retries()
     if not failing_code:
         return DebugOutcome(
             status="STUCK",
@@ -132,6 +147,8 @@ def debug_python_exec(
                 state,
                 expected_output="A Python code block.",
             )
+        except TokenBudgetExceeded:
+            raise
         except (CrewKickoffError, RuntimeError) as exc:
             fix_attempts.append({
                 "attempt": attempt,
@@ -239,11 +256,13 @@ def debug_json_parse(
     instruction: str = "",
     failure_kind: str = "json_parse",
     invalid_payload: dict[str, Any] | None = None,
-    max_retries: int = MAX_DEBUG_RETRIES,
+    max_retries: int | None = None,
 ) -> DebugOutcome:
     """Developer repairs malformed structured output from another agent."""
     from maads.output_contracts import normalize_agent_output, validate_agent_output
 
+    if max_retries is None:
+        max_retries = debug_retries()
     text = (raw_text or "").strip()
     if not text and invalid_payload is None:
         return DebugOutcome(
@@ -371,6 +390,8 @@ def debug_json_parse(
                 state,
                 expected_output=JSON_EXPECTED_OUTPUT,
             )
+        except TokenBudgetExceeded:
+            raise
         except (CrewKickoffError, RuntimeError) as exc:
             fix_attempts.append({
                 "attempt": attempt,

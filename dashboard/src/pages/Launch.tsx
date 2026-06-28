@@ -1,12 +1,149 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { fetchConfigs, postStartRun } from "../shared/api";
-import { useModels } from "../hooks/useCasePolling";
+import { useModelInfo, useModels } from "../hooks/useCasePolling";
 import { useTheme } from "../shared/theme";
 import { prettyCase } from "../shared/format";
-import type { CaseConfig } from "../shared/types";
+import type { CaseConfig, ModelInfo } from "../shared/types";
 
 type LaunchState = "idle" | "launching" | "launched" | "error";
+
+function formatBytes(n: unknown): string | null {
+  if (typeof n !== "number" || !Number.isFinite(n)) return null;
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function formatContextLength(n: unknown): string | null {
+  if (typeof n !== "number" || !Number.isFinite(n)) return null;
+  if (n >= 1000) return `${Math.round(n / 1000)}k tokens`;
+  return `${n} tokens`;
+}
+
+function ModelInfoPanel({
+  info,
+  loading,
+  error,
+  isDefault,
+}: {
+  info: ModelInfo | undefined;
+  loading: boolean;
+  error: Error | null;
+  isDefault: boolean;
+}) {
+  if (loading) {
+    return (
+      <p className="text-sm text-slate-500 animate-pulse">Loading model details from provider…</p>
+    );
+  }
+  if (error) {
+    return (
+      <p className="text-sm text-status-halted">Could not load model details: {error.message}</p>
+    );
+  }
+  if (!info) return null;
+
+  const d = info.details;
+  const caps = Array.isArray(d.capabilities) ? (d.capabilities as string[]) : [];
+  const params =
+    d.parameters && typeof d.parameters === "object"
+      ? (d.parameters as Record<string, string>)
+      : null;
+
+  return (
+    <div
+      className={`rounded-xl border p-4 space-y-2 text-sm ${
+        info.available
+          ? "border-surface-border bg-surface"
+          : "border-status-halted/30 bg-status-halted/10"
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="font-semibold text-slate-200">
+          {info.label ?? info.model ?? (isDefault ? "default (.env)" : "—")}
+        </span>
+        {info.provider && (
+          <span className="text-xs uppercase tracking-wide text-slate-500">{info.provider}</span>
+        )}
+        {!info.available && info.error && (
+          <span className="text-xs text-status-halted break-all">{info.error}</span>
+        )}
+      </div>
+
+      {info.available && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-400">
+          {typeof d.family === "string" && (
+            <span>
+              <span className="font-semibold text-slate-300">Family:</span> {d.family}
+            </span>
+          )}
+          {typeof d.parameter_size === "string" && (
+            <span>
+              <span className="font-semibold text-slate-300">Params:</span> {d.parameter_size}
+            </span>
+          )}
+          {typeof d.quantization === "string" && (
+            <span>
+              <span className="font-semibold text-slate-300">Quant:</span> {d.quantization}
+            </span>
+          )}
+          {formatContextLength(d.context_length) && (
+            <span>
+              <span className="font-semibold text-slate-300">Context:</span>{" "}
+              {formatContextLength(d.context_length)}
+            </span>
+          )}
+          {formatBytes(d.size_bytes) && (
+            <span>
+              <span className="font-semibold text-slate-300">Size:</span>{" "}
+              {formatBytes(d.size_bytes)}
+            </span>
+          )}
+          {typeof d.owned_by === "string" && (
+            <span>
+              <span className="font-semibold text-slate-300">Owner:</span> {d.owned_by}
+            </span>
+          )}
+          {typeof d.modified_at === "string" && (
+            <span>
+              <span className="font-semibold text-slate-300">Updated:</span>{" "}
+              {d.modified_at.slice(0, 19)}
+            </span>
+          )}
+        </div>
+      )}
+
+      {caps.length > 0 && (
+        <p className="text-slate-400">
+          <span className="font-semibold text-slate-300">Capabilities:</span> {caps.join(", ")}
+        </p>
+      )}
+
+      {params && Object.keys(params).length > 0 && (
+        <p className="text-slate-400">
+          <span className="font-semibold text-slate-300">Defaults:</span>{" "}
+          {Object.entries(params)
+            .slice(0, 6)
+            .map(([k, v]) => `${k} ${v}`)
+            .join(" · ")}
+        </p>
+      )}
+
+      {info.json_capabilities && (
+        <p className="text-slate-400">
+          <span className="font-semibold text-slate-300">JSON mode:</span>{" "}
+          {info.json_capabilities.mode.replace(/_/g, " ")}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }) {
   const { clean } = useTheme();
@@ -22,6 +159,12 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
   const [launchedCase, setLaunchedCase] = useState<string | null>(null);
   const [launchedModel, setLaunchedModel] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const {
+    data: modelInfo,
+    isLoading: modelInfoLoading,
+    error: modelInfoError,
+  } = useModelInfo(selectedModel || null);
 
   const activeConfig: CaseConfig | undefined = configs?.find((c) => c.case_id === selected);
 
@@ -116,6 +259,12 @@ export function Launch({ onLaunched }: { onLaunched?: (caseId: string) => void }
                   </optgroup>
                 ) : null}
               </select>
+              <ModelInfoPanel
+                info={modelInfo}
+                loading={modelInfoLoading}
+                error={modelInfoError}
+                isDefault={!selectedModel}
+              />
             </div>
 
             {activeConfig && (

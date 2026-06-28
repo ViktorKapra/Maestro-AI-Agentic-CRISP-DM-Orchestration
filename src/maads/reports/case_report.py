@@ -10,6 +10,8 @@ from maads.conclusions import build_conclusions_summary
 from maads.outcome import ml_outcome_deficits, ml_run_succeeded, workflow_complete
 from maads.reports.md_paths import md_file_link
 from maads.state import CrispDMState
+from maads.reports.report_format import format_token_spend
+from maads.token_budget import build_spending_summary, format_spending_lines
 
 
 def _evidence(ref_type: str, ref: str) -> dict[str, str]:
@@ -46,6 +48,7 @@ def build_case_report(state: CrispDMState) -> dict[str, Any]:
         ],
         "degraded_flags": list(state.degraded_flags),
         "token_spend": dict(state.token_spend),
+        "spending_summary": build_spending_summary(state),
         "validator_findings": list(state.validator_findings),
     }
     why: list[dict[str, Any]] = []
@@ -128,7 +131,11 @@ def render_case_report_md(
     lines.extend(["", "## How?", ""])
     if how.get("halt_reason"):
         lines.append(f"- Halt reason: {how['halt_reason']}")
-    lines.append(f"- Token spend: {how.get('token_spend')}")
+    spending = how.get("spending_summary")
+    if spending:
+        lines.extend(format_spending_lines(spending))
+    else:
+        lines.extend(format_token_spend(how.get("token_spend")))
     for loop in how.get("loops") or []:
         lines.append(
             f"- Loop **{loop.get('label')}** "

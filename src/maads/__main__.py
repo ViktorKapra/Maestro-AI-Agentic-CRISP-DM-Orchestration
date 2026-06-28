@@ -23,6 +23,7 @@ from maads.artifact_runs import case_root, prepare_run_dir
 from maads.artifact_paths import ensure_run_layout
 from maads.knowledge_setup import repo_root
 from maads.model_capabilities import log_model_capabilities
+from maads.model_info import log_selected_model_info
 from maads.rag import ensure_embedding_model_available
 
 from maads.config import load_case_config, kickoff_inputs
@@ -92,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="Override the MODEL env for this run "
                             "(e.g. ollama/gpt-oss:120b-cloud, gpt-4o). "
                             "Recorded in the run manifest.")
+    p_run.add_argument("--max-tokens", type=int, default=None,
+                       help="Override MAX_TOKENS_PER_RUN for this run (hard token cap).")
 
     # ── data ───────────────────────────────────────────────────────────
     p_data = sub.add_parser("data", help="Data utilities.")
@@ -187,6 +190,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     if model_arg:
         os.environ["MODEL"] = model_arg
         os.environ["MAADS_MODEL_OVERRIDE"] = model_arg
+        log_selected_model_info(model_arg)
+    max_tokens_arg = getattr(args, "max_tokens", None)
+    if max_tokens_arg is not None:
+        os.environ["MAX_TOKENS_PER_RUN"] = str(max_tokens_arg)
     embed_warn = ensure_embedding_model_available()
     if embed_warn:
         print(f"WARNING: {embed_warn}", file=sys.stderr)

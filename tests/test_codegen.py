@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from maads.codegen import _extract_code, run_authored_code
+from maads.codegen import _codegen_response_blocked, _extract_code, classify_codegen_response, run_authored_code
 from maads.config import load_case_config
 from maads.paths import resolve_path
 from maads.state import CrispDMState
@@ -91,6 +91,43 @@ def test_authored_code_recovers_from_json_wrapped_response(monkeypatch, pyexec, 
         max_retries=1,
     )
     assert res.ok and res.payload == {"n": 42}
+
+
+def test_codegen_response_blocked_detects_refusal():
+    raw = (
+        '{"status":"BLOCKED","message":"Cannot provide Python code block because '
+        'JSON-only mode is active."}'
+    )
+    assert _codegen_response_blocked(raw) is not None
+    assert "Cannot provide" in _codegen_response_blocked(raw)
+
+
+def test_classify_codegen_response_json_wrapper():
+    raw = '{"code": "import json\\nprint(1)"}'
+    info = classify_codegen_response(raw)
+    assert info["response_shape"] == "json_code_wrapper"
+    assert info["json_valid"] is True
+    assert info["parse_ok"] is True
+    assert info["parsed_json"] is not None
+
+
+def test_authored_code_retries_on_blocked_json(monkeypatch, pyexec, state):
+    blocked = (
+        '{"status":"BLOCKED","message":"JSON-only response required; no markdown fences."}'
+    )
+    _patch_llm(monkeypatch, [
+        blocked,
+        '```python\nimport json\nprint(json.dumps({"n": N + 1}))\n```',
+    ])
+    res = run_authored_code(
+        pyexec=pyexec, agent_name="data_scientist", state=state,
+        instruction="add one to N",
+        header_vars={"N": 41},
+        contract=lambda p: [] if p.get("n") == 42 else ["wrong n"],
+        max_retries=2,
+    )
+    assert res.ok and res.payload == {"n": 42}
+    assert res.attempts == 2
 
 
 def test_authored_code_success(monkeypatch, pyexec, state):

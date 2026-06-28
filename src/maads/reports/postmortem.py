@@ -12,6 +12,7 @@ from maads.observability.llm_communications import build_communications_summary
 from maads.observability.schema import TraceRun
 from maads.outcome import ml_outcome_deficits, ml_run_succeeded, workflow_complete
 from maads.state import CrispDMState
+from maads.token_budget import build_spending_summary
 
 
 def _sandbox_stats(paths: RunPaths) -> dict[str, Any]:
@@ -59,6 +60,7 @@ def build_postmortem(
     if trace and trace.events:
         duration_ms = int(trace.events[-1].ts_mono_ms)
     comm_summary = comm_summary or {}
+    spending = build_spending_summary(state)
     submission = state.dep.submission_path
     sub_exists = bool(submission and Path(submission).is_file())
     if not sub_exists and submission:
@@ -79,6 +81,8 @@ def build_postmortem(
         "loops": loops,
         "token_spend": dict(state.token_spend),
         "token_spend_by_provider": dict(state.token_spend_by_provider),
+        "token_budget": spending.get("budget"),
+        "spending_summary": spending,
         "parse_failures": comm_summary.get("parse_failures", 0),
         "llm_turns": comm_summary.get("turn_count", 0),
         "sandbox": _sandbox_stats(paths),

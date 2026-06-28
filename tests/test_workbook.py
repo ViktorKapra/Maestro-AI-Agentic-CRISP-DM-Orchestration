@@ -141,6 +141,42 @@ def test_write_run_reports_emits_workbook(tmp_path: Path):
     assert (run_dir / "reports" / "case_workbook.ipynb").is_file()
 
 
+_AGENT_43_MARKER = "# MAADS_AGENT_43_CANONICAL_MARKER"
+
+
+def test_canonical_pipeline_uses_winning_43_script(tmp_path: Path):
+    run_dir = tmp_path / "runs" / "canonical-43"
+    ensure_run_layout(run_dir, run_id="canonical-43", case_id="titanic")
+    state = _minimal_state("configs/titanic.yaml", run_dir)
+    (run_dir / "train.parquet").write_bytes(b"")
+    _write_sandbox_script(
+        run_dir,
+        substep="4.3",
+        script_name="00001_data_scientist_attempt1.py",
+        code=f"{_AGENT_43_MARKER}\nprint(json.dumps({{'technique': 'lightgbm', 'cv_score': 0.9}}))\n",
+    )
+    nb_path = write_case_workbook(state, RunPaths(run_dir))
+    notebook = json.loads(nb_path.read_text(encoding="utf-8"))
+    sources = "".join("".join(c.get("source") or []) for c in notebook["cells"])
+    assert _AGENT_43_MARKER in sources
+    assert "successful 4.3 Build Model" in sources
+    assert "No 4.3 sandbox script was captured" not in sources
+
+
+def test_canonical_pipeline_fallback_without_43(tmp_path: Path):
+    run_dir = tmp_path / "runs" / "canonical-fallback"
+    ensure_run_layout(run_dir, run_id="canonical-fallback", case_id="titanic")
+    state = _minimal_state("configs/titanic.yaml", run_dir)
+    (run_dir / "train.parquet").write_bytes(b"")
+    nb_path = write_case_workbook(state, RunPaths(run_dir))
+    notebook = json.loads(nb_path.read_text(encoding="utf-8"))
+    sources = "".join("".join(c.get("source") or []) for c in notebook["cells"])
+    assert "model.joblib" in sources
+    assert "joblib.dump" in sources
+    assert "build_pipeline" in sources
+    assert "No 4.3 sandbox script was captured" in sources
+
+
 def test_workbook_includes_canonical_pipeline(tmp_path: Path):
     cfg = load_case_config(resolve_path("configs/titanic.yaml"))
     run_dir = tmp_path / "runs" / "canonical"

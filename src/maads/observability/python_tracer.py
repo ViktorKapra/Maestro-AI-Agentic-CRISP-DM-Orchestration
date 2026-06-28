@@ -27,6 +27,8 @@ def _skip_traced_exception(exc_type: type[BaseException], exc_val: BaseException
     if getattr(exc_type, "__name__", "") not in _IGNORED_EXCEPTION_NAMES:
         return False
     msg = str(exc_val).strip("'\"")
+    if "token cap" in msg.lower() or "token budget" in msg.lower():
+        return True
     return msg in {"MAX_TOKENS_PER_RUN"} or "MAX_TOKENS_PER_RUN" in msg
 
 

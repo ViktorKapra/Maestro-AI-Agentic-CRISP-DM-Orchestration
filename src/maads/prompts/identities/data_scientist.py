@@ -23,13 +23,13 @@ _SUBSTEP_ASSIGNMENTS: dict[str, dict[str, Any]] = {
         ]
     },
     "4.1": {
-        "objective": "Select one modeling technique from the constrained menu and state assumptions",
+        "objective": "Select one primary modeling approach for this case and state assumptions",
         "requested_outputs": [
             "md.modeling_technique",
             "md.modeling_assumptions"
         ],
         "completion_criteria": [
-            "Technique chosen from menu for config.problem_type with evidence-based justification"
+            "Technique chosen from case evidence and best practices with explicit justification"
         ],
         "constraints": [
             "Establish a baseline before complexity"

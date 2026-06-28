@@ -377,16 +377,12 @@ def _substep_markdown(item: dict[str, Any]) -> str:
 
 
 def _findings_markdown(state: CrispDMState, conclusions: dict[str, Any]) -> str:
+    from maads.reports.report_format import format_assessment_lines
+
     lines = ["## Findings and assessment", ""]
     assessment = conclusions.get("assessment") or state.ev.assessment_of_dm_results or {}
     if assessment:
-        for key in (
-            "metric", "achieved_score", "threshold", "success_criterion_met",
-            "failure_modes", "caveats",
-        ):
-            val = assessment.get(key)
-            if val is not None and val != "":
-                lines.append(f"- **{key}:** {val}")
+        lines.extend(format_assessment_lines(assessment))
         lines.append("")
     cm = conclusions.get("chosen_model")
     if cm and cm.get("evaluation_metrics"):
@@ -547,39 +543,97 @@ def _train_deploy_note(winners: dict[str, dict[str, Any]]) -> str:
     return ""
 
 
-def _canonical_pipeline_markdown(state: CrispDMState) -> str:
-    technique = (
-        state.md.chosen_model.technique
-        if state.md.chosen_model
-        else state.md.modeling_technique or "unspecified"
-    )
+def _chosen_technique(state: CrispDMState) -> str:
+    if state.md.chosen_model and state.md.chosen_model.technique:
+        return state.md.chosen_model.technique
+    return state.md.modeling_technique or "unspecified"
+
+
+_TECHNIQUE_ALIASES: dict[str, str] = {
+    "lgbm": "lightgbm",
+    "xgb": "xgboost",
+    "logreg": "logistic_regression",
+    "lr": "logistic_regression",
+    "gb": "gradient_boosting",
+    "gbc": "gradient_boosting",
+    "gbr": "gradient_boosting",
+    "rf": "random_forest",
+    "svc": "svm",
+    "hist_gb": "hist_gradient_boosting",
+}
+
+
+def _normalize_technique(name: str) -> str:
+    normalized = name.lower().strip().replace("-", "_").replace(" ", "_")
+    return _TECHNIQUE_ALIASES.get(normalized, normalized)
+
+
+def _canonical_pipeline_markdown(state: CrispDMState, *, from_agent_script: bool) -> str:
+    technique = _chosen_technique(state)
+    if from_agent_script:
+        return (
+            "## Canonical pipeline (human continuation)\n\n"
+            f"The cell below is the agent's **successful 4.3 Build Model** sandbox "
+            f"script for **{technique}** — not a synthetic template. Review and "
+            "adapt it for deployment and submission consistency.\n"
+        )
     return (
         "## Canonical pipeline (human continuation)\n\n"
-        f"Single sklearn `Pipeline` aligned with substeps 4.3/4.4, using "
-        f"**{technique}**. Fits on `train.parquet`, saves "
-        "`notebook_outputs/model.joblib`, and writes "
-        "`notebook_outputs/submission.csv` with the same preprocessing as training.\n"
+        f"No 4.3 sandbox script was captured for this run. The simplified sklearn "
+        f"template below uses **{technique}** as a starting point only — it may "
+        "not match what the agent chose or ran. Prefer any 4.3 script in the "
+        "Modeling section above when present.\n"
     )
 
 
-def _canonical_pipeline_code(state: CrispDMState) -> str:
-    technique = (
-        state.md.chosen_model.technique
-        if state.md.chosen_model
-        else state.md.modeling_technique or "gradient_boosting"
+def _template_estimator_block(problem: str) -> tuple[str, str]:
+    optional_boosters = '''\
+try:
+    import lightgbm as lgb
+    _ESTIMATORS["lightgbm"] = (
+        lgb.LGBMClassifier(random_state=42, verbosity=-1)
+        if PROBLEM_TYPE != "regression"
+        else lgb.LGBMRegressor(random_state=42, verbosity=-1)
     )
-    problem = state.config.problem_type
+except ImportError:
+    pass
+try:
+    import xgboost as xgb
+    _ESTIMATORS["xgboost"] = (
+        xgb.XGBClassifier(random_state=42, eval_metric="logloss")
+        if PROBLEM_TYPE != "regression"
+        else xgb.XGBRegressor(random_state=42)
+    )
+except ImportError:
+    pass
+try:
+    from catboost import CatBoostClassifier, CatBoostRegressor
+    _ESTIMATORS["catboost"] = (
+        CatBoostClassifier(random_state=42, verbose=0)
+        if PROBLEM_TYPE != "regression"
+        else CatBoostRegressor(random_state=42, verbose=0)
+    )
+except ImportError:
+    pass
+'''
     if problem == "regression":
-        estimator_block = f'''\
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import Ridge
+        estimator_block = '''\
+from sklearn.ensemble import (
+    GradientBoostingRegressor,
+    HistGradientBoostingRegressor,
+    RandomForestRegressor,
+)
+from sklearn.linear_model import ElasticNet, Lasso, Ridge
 
-_ESTIMATORS = {{
+_ESTIMATORS = {
     "ridge": Ridge(random_state=42),
+    "lasso": Lasso(random_state=42, max_iter=5000),
+    "elastic_net": ElasticNet(random_state=42, max_iter=5000),
     "random_forest": RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1),
     "gradient_boosting": GradientBoostingRegressor(random_state=42),
-}}
-'''
+    "hist_gradient_boosting": HistGradientBoostingRegressor(random_state=42),
+}
+''' + optional_boosters
         predict_fn = '''\
 y_pred = pipeline.predict(X_test)
 if use_log_target:
@@ -588,15 +642,22 @@ if use_log_target:
 '''
     elif problem == "binary_classification":
         estimator_block = '''\
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+)
 from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
 
 _ESTIMATORS = {
     "logistic_regression": LogisticRegression(max_iter=1000, random_state=42),
     "random_forest": RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1),
     "gradient_boosting": GradientBoostingClassifier(random_state=42),
+    "hist_gradient_boosting": HistGradientBoostingClassifier(random_state=42),
+    "svm": SVC(probability=True, random_state=42),
 }
-'''
+''' + optional_boosters
         predict_fn = '''\
 y_pred = pipeline.predict(X_test)
 '''
@@ -611,10 +672,27 @@ _ESTIMATORS = {
         predict_fn = '''\
 y_pred = pipeline.predict(X_test)
 '''
+    return estimator_block, predict_fn
 
+
+def _canonical_pipeline_template_code(state: CrispDMState) -> str:
+    raw_technique = (
+        state.md.chosen_model.technique
+        if state.md.chosen_model
+        else state.md.modeling_technique or "gradient_boosting"
+    )
+    technique = _normalize_technique(raw_technique)
+    problem = state.config.problem_type
+    estimator_block, predict_fn = _template_estimator_block(problem)
+    default = "ridge" if problem == "regression" else "logistic_regression"
+    note = (
+        "# NOTE: no 4.3 sandbox script captured; template may not match agent choice\n"
+        if raw_technique != "unspecified"
+        else "# NOTE: no 4.3 sandbox script captured; using simplified template\n"
+    )
     return f'''\
 """Fit one sklearn Pipeline, persist model.joblib, and write a submission."""
-import joblib
+{note}import joblib
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
@@ -624,13 +702,17 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 {estimator_block}
 TECHNIQUE = {technique!r}
+_DEFAULT_TECHNIQUE = {default!r}
 MODEL_PATH = NOTEBOOK_OUT / "model.joblib"
 SUBMISSION_OUT = NOTEBOOK_OUT / "submission.csv"
 
 def build_pipeline(technique: str):
     if technique not in _ESTIMATORS:
-        known = ", ".join(sorted(_ESTIMATORS))
-        raise ValueError(f"Unknown technique {{technique!r}}; expected one of: {{known}}")
+        print(
+            f"WARNING: {{technique!r}} not in template registry; "
+            f"using {{_DEFAULT_TECHNIQUE!r}}"
+        )
+        technique = _DEFAULT_TECHNIQUE
     estimator = _ESTIMATORS[technique]
 
     train_df = pd.read_parquet(TRAIN_PARQUET)
@@ -689,6 +771,15 @@ out = pd.DataFrame({{id_col: test_ids, target_col: y_pred}})
 out.to_csv(SUBMISSION_OUT, index=False)
 print(f"Wrote {{SUBMISSION_OUT}} ({{len(out)}} rows)")
 '''
+
+
+def _canonical_pipeline_code(
+    state: CrispDMState,
+    scripts: dict[str, str] | None = None,
+) -> str:
+    if scripts and scripts.get("4.3"):
+        return scripts["4.3"]
+    return _canonical_pipeline_template_code(state)
 
 
 def build_workbook_context(
@@ -756,8 +847,9 @@ def render_workbook_ipynb(context: dict[str, Any], state: CrispDMState, paths: R
         cells.append(_cell_md(train_deploy))
 
     if state.md.chosen_model or "4.3" in scripts or (paths.run_dir / "train.parquet").is_file():
-        cells.append(_cell_md(_canonical_pipeline_markdown(state)))
-        cells.append(_cell_code(_canonical_pipeline_code(state)))
+        from_agent = "4.3" in scripts
+        cells.append(_cell_md(_canonical_pipeline_markdown(state, from_agent_script=from_agent)))
+        cells.append(_cell_code(_canonical_pipeline_code(state, scripts)))
 
     cells.append(_cell_md(_findings_markdown(state, conclusions)))
 

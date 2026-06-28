@@ -124,7 +124,7 @@ def test_agent_identity_embedded(agent_id):
         assert "MODELING BOUNDARY" not in p["backstory"]
     if agent_id == "data_scientist":
         assert p["role"] == "Senior Data Scientist (Modeling & Evaluation)"
-        assert "CONSTRAINED TECHNIQUE MENU" in p["backstory"]
+        assert "MODEL FAMILY SELECTION" in p["backstory"]
         assert "UNCERTAINTY AND WEAK RESULTS" in p["backstory"]
         assert "MODELING BOUNDARY" not in p["backstory"]
 

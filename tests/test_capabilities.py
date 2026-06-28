@@ -3,12 +3,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
 import pandas as pd
 import pytest
 
 import maads.crew as crew
 from maads.capabilities.data_engineer import execution_evidence
-from maads.capabilities.data_scientist import execution_evidence as ds_execution_evidence
+from maads.capabilities.data_scientist import (
+    _train_schema_context,
+    _text_modeling_hint,
+    execution_evidence as ds_execution_evidence,
+)
+from maads.state import CrispDMState
 from maads.capabilities.shared import (
     abspath,
     de_dataset_context,
@@ -55,6 +62,121 @@ def test_ds_execution_evidence_explore_with_stub_code(monkeypatch, state, tmp_pa
     pyexec = PythonExec(workdir=tmp_path / "sandbox")
     out = ds_execution_evidence(pyexec, state, "2.3", tmp_path)
     assert "data_exploration_report" in out
+
+
+def test_train_schema_context_notes_absent_id(tmp_path):
+    train_path = tmp_path / "train.parquet"
+    pd.DataFrame({"target": [0, 1], "text": ["a", "b"]}).to_parquet(train_path)
+    cols, note = _train_schema_context(str(train_path), "id")
+    assert cols == ["target", "text"]
+    assert "absent" in note
+    assert "if c in train.columns" in note
+
+
+def test_text_modeling_hint_for_text_cases(state):
+    state.config.feature_hints = {"text_free": ["text"]}
+    hint = _text_modeling_hint(state)
+    assert "TfidfVectorizer" in hint
+    assert "FunctionTransformer" in hint
+
+
+def test_schema_columns_prefers_prepared_train(state):
+    from maads.debug import _schema_columns
+
+    state.dp.merged_data = {"columns_train": ["target", "text", "keyword"]}
+    state.du.data_description_report = {"columns": ["id", "target", "text", "keyword", "location"]}
+    assert _schema_columns(state) == ["target", "text", "keyword"]
+
+
+def test_text_model_baseline_on_prepared_train_without_id(tmp_path):
+    from maads.capabilities.data_scientist import _run_text_model_baseline
+    from maads.tools import PythonExec
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "artifacts/disaster_tweets/runs/c4ddf126-1124-4ed5-908f-ff4da33f5e5d/train.parquet"
+    )
+    train_path = tmp_path / "train.parquet"
+    pd.read_parquet(source).to_parquet(train_path)
+    cols = list(pd.read_parquet(train_path).columns)
+    header_vars = {
+        "TRAIN_PARQUET": str(train_path),
+        "TRAIN_COLUMNS": json.dumps(cols),
+        "TARGET": "target",
+        "ID_COL": "id",
+        "METRIC": "f1",
+        "PROBLEM_TYPE": "binary_classification",
+    }
+    pyexec = PythonExec(workdir=tmp_path / "sandbox")
+    payload = _run_text_model_baseline(pyexec, header_vars)
+    assert payload["technique"] == "tfidf_logreg"
+    assert isinstance(payload["cv_score"], float)
+    assert isinstance(payload["cv_std"], float)
+
+
+def test_ds_43_text_fallback_when_authored_code_fails(monkeypatch, tmp_path):
+    import maads.crew as crew
+    from maads.config import load_case_config
+    from maads.paths import resolve_path
+    from maads.tools import PythonExec
+
+    cfg = load_case_config(resolve_path("configs/disaster_tweets.yaml"))
+    state = CrispDMState.from_config(cfg)
+    state.substep = "4.3"
+    train_path = tmp_path / "train.parquet"
+    pd.read_parquet(
+        "/Users/miroslavgeorgiev/work/Maestro-AI-Agentic-CRISP-DM-Orchestration/"
+        "artifacts/disaster_tweets/runs/c4ddf126-1124-4ed5-908f-ff4da33f5e5d/train.parquet"
+    ).to_parquet(train_path)
+    state.dp.dataset = {"train": str(train_path)}
+    state.md.modeling_technique = "tfidf_logreg"
+
+    broken = '''```python
+train = pd.read_parquet(TRAIN_PARQUET)
+if ID_COL not in train.columns:
+    raise ValueError(f"missing {ID_COL}")
+```'''
+
+    monkeypatch.setattr(crew, "run_text_task", lambda *a, **k: broken)
+    pyexec = PythonExec(workdir=tmp_path / "sandbox")
+    out = ds_execution_evidence(pyexec, state, "4.3", tmp_path)
+    assert "model_run" in out
+    assert out["model_run"]["cv_score"] is not None
+    assert out["model_run"]["technique"] == "tfidf_logreg"
+
+
+def test_ds_44_text_fallback_when_authored_code_fails(monkeypatch, tmp_path):
+    import maads.crew as crew
+    from maads.config import load_case_config
+    from maads.paths import resolve_path
+    from maads.state import ModelRun
+    from maads.tools import PythonExec
+
+    cfg = load_case_config(resolve_path("configs/disaster_tweets.yaml"))
+    state = CrispDMState.from_config(cfg)
+    state.substep = "4.4"
+    train_path = tmp_path / "train.parquet"
+    pd.read_parquet(
+        "/Users/miroslavgeorgiev/work/Maestro-AI-Agentic-CRISP-DM-Orchestration/"
+        "artifacts/disaster_tweets/runs/c4ddf126-1124-4ed5-908f-ff4da33f5e5d/train.parquet"
+    ).to_parquet(train_path)
+    state.dp.dataset = {"train": str(train_path)}
+    state.md.models.append(
+        ModelRun(technique="tfidf_logreg", cv_score=0.74, cv_std=0.01, description="test"),
+    )
+
+    broken = '''```python
+raise RuntimeError("no pipeline in state")
+```'''
+
+    monkeypatch.setattr(crew, "run_text_task", lambda *a, **k: broken)
+    pyexec = PythonExec(workdir=tmp_path / "sandbox")
+    out = ds_execution_evidence(pyexec, state, "4.4", tmp_path)
+    assert "evaluation_bundle" in out
+    bundle = out["evaluation_bundle"]
+    assert bundle["problem_type"] == "binary_classification"
+    assert "f1" in bundle["metrics"]
+    assert bundle["confusion_matrix"]
 
 
 # --- prep_inputs stage routing ------------------------------------------------

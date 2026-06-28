@@ -81,6 +81,13 @@ def probe_model(model: str) -> ModelJsonCapabilities:
     return _probe_openai_compatible(model)
 
 
+def cached_model_capabilities(model: str) -> ModelJsonCapabilities | None:
+    """Return probe results for ``model`` when already cached, else None."""
+    if _capabilities_cache is None:
+        return None
+    return _capabilities_cache.get(model)
+
+
 def get_model_capabilities(model: str) -> ModelJsonCapabilities:
     """Return cached capabilities for ``model``, probing on demand if needed."""
     global _capabilities_cache
